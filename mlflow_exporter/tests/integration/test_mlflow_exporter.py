@@ -8,7 +8,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import mlflow
 import pytest
 import requests
 from mlflow.exceptions import RestException
@@ -18,9 +17,20 @@ from tenacity import retry, stop_after_delay, wait_fixed
 TEST_EXPORTER_TIMEOUT = 20
 
 
+@retry(stop=stop_after_delay(60), wait=wait_fixed(1))
+def _wait_for_mlflow_ready(tracking_url: str) -> None:
+    """Poll the MLflow server until it accepts requests."""
+    requests.get(f"{tracking_url}health", timeout=2).raise_for_status()
+
+
 @pytest.fixture
 def exporter_server(tmp_path):
-    """Deploy local MLflow server with the exporter on different processes."""
+    """Deploy local MLflow server with the exporter on different processes.
+
+    Test data is seeded after MLflow is ready but *before* the exporter
+    starts, so that the exporter's first baseline snapshot already contains
+    the registered model and all runs.
+    """
     mlflow_port = _get_free_port()
     exporter_port = _get_free_port()
     artifact_root = tmp_path / "artifacts"
@@ -41,6 +51,22 @@ def exporter_server(tmp_path):
             artifact_root.as_uri(),
         ]
     )
+
+    _wait_for_mlflow_ready(tracking_url)
+
+    client = MlflowClient(tracking_uri=tracking_url)
+    finished_run = client.create_run("0")
+    failed_run = client.create_run("0")
+    killed_run = client.create_run("0")
+    running_run = client.create_run("0")
+    client.set_terminated(finished_run.info.run_id, status="FINISHED")
+    client.set_terminated(failed_run.info.run_id, status="FAILED")
+    client.set_terminated(killed_run.info.run_id, status="KILLED")
+    try:
+        client.create_registered_model("model_name")
+    except RestException:
+        pass
+
     exporter_process = subprocess.Popen(
         [
             sys.executable,
@@ -58,6 +84,7 @@ def exporter_server(tmp_path):
     yield {
         "tracking_url": tracking_url,
         "exporter_port": exporter_port,
+        "running_run": running_run,
     }
 
     # Clean up after the processes
@@ -90,26 +117,8 @@ def verify_metrics(exporter_port):
 
 
 def test_exporter_integration(exporter_server):
-    """Perform a sample MLflow operation that affects the metrics."""
-    mlflow.set_tracking_uri(exporter_server["tracking_url"])
-    client = MlflowClient(tracking_uri=exporter_server["tracking_url"])
-
-    running_run = client.create_run("0")
-    finished_run = client.create_run("0")
-    failed_run = client.create_run("0")
-    killed_run = client.create_run("0")
-    client.set_terminated(finished_run.info.run_id, status="FINISHED")
-    client.set_terminated(failed_run.info.run_id, status="FAILED")
-    client.set_terminated(killed_run.info.run_id, status="KILLED")
-
-    try:
-        client.create_registered_model("model_name")
-    except RestException:
-        pass
-
-    assert running_run.info.status == "RUNNING"
-
-    # Wait for the metrics to be collected and updated using Tenacity
+    """Verify that the exporter exposes the expected MLflow metrics."""
+    assert exporter_server["running_run"].info.status == "RUNNING"
     verify_metrics(exporter_server["exporter_port"])
 
 
