@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=40", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mlflow-prometheus-exporter"
+version = "0.1.0"
+description = "Prometheus exporter for MLflow observability metrics"
+requires-python = ">=3.10"
+dependencies = [
+    "mlflow>=3.0",
+    "prometheus_client>=0.17",
+]
+
+[project.scripts]
+mlflow-exporter = "mlflow_exporter.mlflow_exporter:main"
+
+[tool.setuptools.packages.find]
+include = ["mlflow_exporter"]
+
+[tool.isort]
+profile = "black"
+
+[tool.black]
+line-length = 79

@@ -1,0 +1,10 @@
+codespell
+flake8
+flake8-builtins
+flake8-copyright
+flake8-docstrings
+mypy
+pep8-naming
+pyproject-flake8
+types-requests
+-r requirements-fmt.txt

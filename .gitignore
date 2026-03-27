@@ -1,0 +1,67 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# tox
+.tox/
+
+# Test and coverage
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.pytest_cache/
+.hypothesis/
+
+# Type checkers
+.mypy_cache/
+.dmypy.json
+.pyre/
+.pytype/
+.ruff_cache/
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# MLflow local artefacts (produced by integration tests)
+mlruns/
+mlartifacts/
+*.db
+
+.coverage
+__pycache__/
+
+.github/
+*.py[cod]
+
+# IDEs and editors
+.idea
+.vscode/
+.codex/
+.devcontainer/
+
