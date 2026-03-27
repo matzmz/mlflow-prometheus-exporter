@@ -112,7 +112,7 @@ curl http://localhost:8000/metrics
 ### Quickstart
 
 ```shell
-git clone xxx
+git clone https://github.com/matzmz/mlflow-prometheus-exporter/
 cd mlflow-prometheus-exporter
 pip install tox
 
