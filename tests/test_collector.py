@@ -8,7 +8,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mlflow_exporter.collector import MlflowObservabilityCollector, _Baseline
+from mlflow_exporter.collector import (
+    MAX_BACKOFF_SECONDS,
+    MlflowObservabilityCollector,
+    _Baseline,
+    _backoff_interval,
+)
 from mlflow_exporter.settings import RUN_STATUSES, MlflowSnapshot
 
 
@@ -502,3 +507,19 @@ def test_build_snapshot_from_baseline_merges_baseline_and_delta() -> None:
     assert snapshot.runs_by_status["FINISHED"] == 5
     assert snapshot.registered_models_total == 2
     assert snapshot.model_versions_total == 7
+
+
+def test_backoff_interval_returns_base_on_zero_failures() -> None:
+    """No failures means the original interval is used."""
+    assert _backoff_interval(30, 0) == 30
+
+
+def test_backoff_interval_doubles_on_each_failure() -> None:
+    """Consecutive failures successively double the wait interval."""
+    assert _backoff_interval(30, 1) == 60
+    assert _backoff_interval(30, 2) == 120
+
+
+def test_backoff_interval_caps_at_maximum() -> None:
+    """The backoff interval never exceeds MAX_BACKOFF_SECONDS."""
+    assert _backoff_interval(30, 100) == MAX_BACKOFF_SECONDS

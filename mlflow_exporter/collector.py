@@ -40,6 +40,18 @@ from mlflow_exporter.settings import (
 )
 
 LOGGER = logging.getLogger(__name__)
+MAX_BACKOFF_SECONDS = 600
+
+
+def _backoff_interval(
+    base_interval: int, consecutive_failures: int
+) -> int:
+    """Return the wait interval with exponential backoff on failures."""
+    if consecutive_failures <= 0:
+        return base_interval
+    return min(
+        base_interval * (2 ** consecutive_failures), MAX_BACKOFF_SECONDS
+    )
 
 
 @dataclass(frozen=True)
@@ -166,12 +178,17 @@ class MlflowObservabilityCollector:
         on_failure: Callable[[float], None],
     ) -> None:
         """Refresh delta state forever and report outcomes through callbacks."""
-        while not self._wait_for_next_delta_cycle(poll_interval_seconds):
+        consecutive_failures = 0
+        while not self._wait_for_next_delta_cycle(
+            _backoff_interval(poll_interval_seconds, consecutive_failures)
+        ):
             started = time.monotonic()
             try:
                 snapshot = self.refresh_delta_snapshot()
                 on_snapshot(snapshot, time.monotonic() - started)
+                consecutive_failures = 0
             except Exception:
+                consecutive_failures += 1
                 on_failure(time.monotonic() - started)
                 LOGGER.exception("MLflow delta refresh failed")
 
@@ -181,23 +198,32 @@ class MlflowObservabilityCollector:
         on_failure: Callable[[float], None],
     ) -> None:
         """Periodically rebuild and publish the baseline."""
-        while not self._wait_for_next_baseline_cycle():
+        consecutive_failures = 0
+        while not self._wait_for_next_baseline_cycle(
+            _backoff_interval(
+                self._baseline_interval_seconds, consecutive_failures
+            )
+        ):
             started = time.monotonic()
             try:
                 snapshot = self._run_baseline_cycle(blocking=False)
                 if snapshot is not None:
                     on_snapshot(snapshot, time.monotonic() - started)
+                consecutive_failures = 0
             except Exception:
+                consecutive_failures += 1
                 on_failure(time.monotonic() - started)
                 LOGGER.exception("Background baseline refresh failed")
 
-    def _wait_for_next_baseline_cycle(self) -> bool:
+    def _wait_for_next_baseline_cycle(
+        self, interval_seconds: int
+    ) -> bool:
         """Wait for the next baseline cycle or a stop request."""
-        return self._stop_event.wait(self._baseline_interval_seconds)
+        return self._stop_event.wait(interval_seconds)
 
-    def _wait_for_next_delta_cycle(self, poll_interval_seconds: int) -> bool:
+    def _wait_for_next_delta_cycle(self, interval_seconds: int) -> bool:
         """Wait for the next delta cycle or a stop request."""
-        return self._stop_event.wait(poll_interval_seconds)
+        return self._stop_event.wait(interval_seconds)
 
     def _run_baseline_cycle(self, blocking: bool) -> Optional[MlflowSnapshot]:
         """Build a baseline and publish a matching merged snapshot."""
