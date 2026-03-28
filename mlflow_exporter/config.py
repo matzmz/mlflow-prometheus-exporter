@@ -13,6 +13,8 @@ from mlflow_exporter.settings import (
     DEFAULT_BASELINE_INTERVAL_SECONDS,
     DEFAULT_EXPORTER_PORT,
     DEFAULT_LISTEN_ADDRESS,
+    DEFAULT_MLFLOW_REQUEST_MAX_RETRIES,
+    DEFAULT_MLFLOW_REQUEST_TIMEOUT_SECONDS,
     DEFAULT_POLL_INTERVAL_SECONDS,
     DEFAULT_TRACKING_URI,
     ExporterSettings,
@@ -135,6 +137,22 @@ def configure_mlflow_client(settings: ExporterSettings) -> MlflowClient:
     MlflowClient: Client instance bound to the tracking URI in settings.
     """
     os.environ["MLFLOW_TRACKING_URI"] = settings.tracking_uri
+    os.environ["MLFLOW_HTTP_REQUEST_TIMEOUT"] = str(
+        int(
+            os.getenv(
+                "MLFLOW_HTTP_REQUEST_TIMEOUT",
+                DEFAULT_MLFLOW_REQUEST_TIMEOUT_SECONDS,
+            )
+        )
+    )
+    os.environ["MLFLOW_HTTP_REQUEST_MAX_RETRIES"] = str(
+        int(
+            os.getenv(
+                "MLFLOW_HTTP_REQUEST_MAX_RETRIES",
+                DEFAULT_MLFLOW_REQUEST_MAX_RETRIES,
+            )
+        )
+    )
     if settings.tracking_username:
         os.environ["MLFLOW_TRACKING_USERNAME"] = settings.tracking_username
     if settings.tracking_password:
