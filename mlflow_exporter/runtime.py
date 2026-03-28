@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 
 
 """Runtime service for the MLflow Prometheus exporter."""

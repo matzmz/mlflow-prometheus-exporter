@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 
 
 """Integration tests for testing mlflow exporter with local MLflow server."""

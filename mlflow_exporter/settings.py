@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 
 
 """Runtime constants and typed configuration data structures."""

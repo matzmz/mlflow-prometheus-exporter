@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 
 
 """Prometheus metric definitions and update logic."""

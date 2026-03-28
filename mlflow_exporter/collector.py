@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 
 
 """MLflow observability data collector with coordinated baseline+delta refreshes.
