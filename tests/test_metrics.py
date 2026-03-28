@@ -25,6 +25,7 @@ def metrics() -> Generator[PrometheusMetrics, None, None]:
         patch("mlflow_exporter.metrics.Gauge", side_effect=_new_mock),
         patch("mlflow_exporter.metrics.Histogram", side_effect=_new_mock),
         patch("mlflow_exporter.metrics.Counter", side_effect=_new_mock),
+        patch("mlflow_exporter.metrics.Info", side_effect=_new_mock),
     ):
         yield PrometheusMetrics()
 

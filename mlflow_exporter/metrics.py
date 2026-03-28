@@ -1,11 +1,14 @@
+#!/usr/bin/env python3
 
 
 """Prometheus metric definitions and update logic."""
 
+import platform
 import time
 
-from prometheus_client import Counter, Gauge, Histogram
+from prometheus_client import Counter, Gauge, Histogram, Info
 
+import mlflow_exporter
 from mlflow_exporter.settings import MlflowSnapshot
 
 
@@ -14,6 +17,16 @@ class PrometheusMetrics:
 
     def __init__(self):
         """Register all Prometheus metrics."""
+        self.build_info = Info(
+            "mlflow_exporter",
+            "MLflow Prometheus exporter build information.",
+        )
+        self.build_info.info(
+            {
+                "version": mlflow_exporter.__version__,
+                "python_version": platform.python_version(),
+            }
+        )
         self.experiments_total = Gauge(
             "mlflow_experiments_total",
             "Total number of MLflow experiments.",
