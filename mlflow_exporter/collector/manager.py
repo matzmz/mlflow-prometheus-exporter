@@ -1,4 +1,4 @@
-"""Runtime coordination for baseline+delta MLflow collection.
+"""Runtime management for baseline+delta MLflow collection.
 
 The collector owns refresh timing, concurrency control, and publication of the
 latest immutable snapshot. Query details and snapshot assembly live in

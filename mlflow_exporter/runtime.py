@@ -3,7 +3,7 @@
 import logging
 import time
 
-from mlflow_exporter.collector.coordinator import (
+from mlflow_exporter.collector.manager import (
     MlflowObservabilityCollector,
 )
 from mlflow_exporter.config.settings import ExporterSettings

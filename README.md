@@ -156,26 +156,43 @@ Commit the updated `*.txt` files alongside the `*.in` changes.
 ```
 mlflow_exporter/
 ├── __init__.py            # package marker and version
+├── collector/
+│   ├── __init__.py
+│   ├── assembler.py       # helper: normalization, merges, baseline/snapshot assembly
+│   ├── manager.py         # refresh runtime: locks, loops, publication
+│   ├── queries.py         # MLflow pagination, filters, and query adapter
+│   └── state.py           # collector state dataclasses
+├── config/
+│   ├── __init__.py
+│   ├── cli.py             # CLI parsing, env resolution, MlflowClient setup
+│   ├── log.py             # logging configuration
+│   └── settings.py        # constants and typed dataclasses
+├── infra/
+│   ├── __init__.py
+│   ├── metrics.py         # Prometheus metric definitions and update logic
+│   └── server.py          # HTTP server with /healthz, /readyz, /metrics
 ├── main.py                # composition root and process entrypoint
-├── settings.py            # constants and typed dataclasses
-├── config.py              # CLI parsing, env resolution, MlflowClient setup
-├── collector.py           # refresh runtime: locks, loops, publication
-├── collector_assembler.py # helper: normalization, merges, baseline/snapshot assembly
-├── collector_queries.py   # MLflow pagination, filters, and query adapter
-├── collector_state.py     # collector state dataclasses
-├── metrics.py             # Prometheus metric definitions and update logic
 ├── runtime.py             # runtime service coordinating collector + metrics
-└── server.py              # HTTP server with /healthz, /readyz, /metrics
+└── models.py              # shared domain value objects
 tests/
 ├── helpers.py             # shared test factories
-├── test_collector_assembler.py
-├── test_collector.py
-├── test_collector_queries.py
-├── test_exporter_config.py
-├── test_metrics.py
-├── test_orchestrator.py
-├── test_runtime.py
-├── test_server.py
+├── app/
+│   ├── __init__.py
+│   ├── test_main.py
+│   └── test_runtime.py
+├── collector/
+│   ├── __init__.py
+│   ├── test_assembler.py
+│   ├── test_manager.py
+│   └── test_queries.py
+├── config/
+│   ├── __init__.py
+│   ├── test_cli.py
+│   └── test_log.py
+├── infra/
+│   ├── __init__.py
+│   ├── test_metrics.py
+│   └── test_server.py
 └── integration/
     └── test_mlflow_exporter.py
 ```

@@ -7,10 +7,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mlflow_exporter.collector import (
+from mlflow_exporter.collector.manager import (
     MAX_BACKOFF_SECONDS,
     MlflowObservabilityCollector,
     _backoff_interval,
+)
+from mlflow_exporter.collector.state import (
     _Baseline,
     _ExperimentBaseline,
     _ExperimentRef,
@@ -190,7 +192,7 @@ def test_start_baseline_worker_is_idempotent() -> None:
     collector = MlflowObservabilityCollector(_empty_client())
 
     with patch(
-        "mlflow_exporter.collector.coordinator.threading.Thread"
+        "mlflow_exporter.collector.manager.threading.Thread"
     ) as mock_thread:
         collector.start_baseline_worker()
         collector.start_baseline_worker()

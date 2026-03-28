@@ -13,7 +13,7 @@ The exporter is structured around three sub-packages and two top-level modules:
 - `config/settings.py`: runtime constants and typed configuration
 - `config/cli.py`: CLI argument parsing and MLflow client setup
 - `config/log.py`: logging configuration
-- `collector/coordinator.py`: refresh runtime, locks, and snapshot publication
+- `collector/manager.py`: refresh runtime, locks, and snapshot publication
 - `collector/assembler.py`: helper that normalises, merges, and assembles collector state
 - `collector/queries.py`: MLflow query adapter and pagination details
 - `collector/state.py`: collector state dataclasses
@@ -85,9 +85,9 @@ It is responsible for:
 - setting up the root logger with the requested level and format
 - providing text and JSON output formatters
 
-### `mlflow_exporter/collector/coordinator.py`
+### `mlflow_exporter/collector/manager.py`
 
-This is the refresh coordinator.
+This is the refresh manager.
 
 It is responsible for:
 

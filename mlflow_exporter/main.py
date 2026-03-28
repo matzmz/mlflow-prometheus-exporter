@@ -7,7 +7,7 @@ import logging
 import signal
 from typing import Optional, Sequence
 
-from mlflow_exporter.collector.coordinator import (
+from mlflow_exporter.collector.manager import (
     MlflowObservabilityCollector,
 )
 from mlflow_exporter.config.cli import configure_mlflow_client, parse_args
