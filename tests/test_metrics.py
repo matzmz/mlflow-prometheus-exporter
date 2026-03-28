@@ -1,3 +1,4 @@
+# pyright: reportAttributeAccessIssue=false
 """Unit tests for PrometheusMetrics."""
 
 from typing import Any, Generator
