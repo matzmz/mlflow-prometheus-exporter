@@ -44,6 +44,8 @@ def test_configure_mlflow_client_applies_credentials(monkeypatch):
         tracking_uri="https://tracking.example",
         tracking_username="name.lastname@example.com",
         tracking_password="secret-api-key",
+        log_level="INFO",
+        log_format="text",
     )
 
     with patch(
@@ -114,6 +116,8 @@ def test_configure_mlflow_client_without_credentials(monkeypatch) -> None:
         tracking_uri="https://tracking.example",
         tracking_username=None,
         tracking_password=None,
+        log_level="INFO",
+        log_format="text",
     )
 
     with patch("mlflow_exporter.config.mlflow.set_tracking_uri"):
@@ -142,3 +146,39 @@ def test_parse_args_rejects_invalid_port() -> None:
     with patch("argparse.ArgumentParser.error", side_effect=ValueError):
         with pytest.raises(ValueError):
             parse_args(["--port", "70000"])
+
+
+def test_parse_args_accepts_log_level_and_format() -> None:
+    """parse_args() accepts --log-level and --log-format CLI arguments."""
+    settings = parse_args(["--log-level", "DEBUG", "--log-format", "json"])
+
+    assert settings.log_level == "DEBUG"
+    assert settings.log_format == "json"
+
+
+def test_parse_args_normalises_log_level_case() -> None:
+    """parse_args() normalises log level to uppercase."""
+    settings = parse_args(["--log-level", "warning"])
+
+    assert settings.log_level == "WARNING"
+
+
+def test_parse_args_normalises_log_format_case() -> None:
+    """parse_args() normalises log format to lowercase."""
+    settings = parse_args(["--log-format", "JSON"])
+
+    assert settings.log_format == "json"
+
+
+def test_parse_args_rejects_invalid_log_level() -> None:
+    """parse_args() rejects unrecognised log levels."""
+    with patch("argparse.ArgumentParser.error", side_effect=ValueError):
+        with pytest.raises(ValueError):
+            parse_args(["--log-level", "VERBOSE"])
+
+
+def test_parse_args_rejects_invalid_log_format() -> None:
+    """parse_args() rejects unrecognised log formats."""
+    with patch("argparse.ArgumentParser.error", side_effect=ValueError):
+        with pytest.raises(ValueError):
+            parse_args(["--log-format", "xml"])

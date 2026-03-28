@@ -18,6 +18,8 @@ def make_settings(**overrides: object) -> ExporterSettings:
         tracking_uri="http://localhost:5000/",
         tracking_username=None,
         tracking_password=None,
+        log_level="INFO",
+        log_format="text",
     )
     defaults.update(overrides)
     return ExporterSettings(**defaults)

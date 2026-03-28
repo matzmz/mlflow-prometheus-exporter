@@ -13,6 +13,11 @@ DEFAULT_BASELINE_INTERVAL_SECONDS = 3_600
 DEFAULT_TRACKING_URI = "http://localhost:5000/"
 DEFAULT_MLFLOW_REQUEST_TIMEOUT_SECONDS = 30
 DEFAULT_MLFLOW_REQUEST_MAX_RETRIES = 3
+DEFAULT_LOG_LEVEL = "INFO"
+DEFAULT_LOG_FORMAT = "text"
+
+VALID_LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+VALID_LOG_FORMATS = ("text", "json")
 
 EXPERIMENT_PAGE_SIZE = 1_000
 MODEL_PAGE_SIZE = 100
@@ -40,6 +45,8 @@ class ExporterSettings:
     tracking_uri: str
     tracking_username: Optional[str]
     tracking_password: Optional[str]
+    log_level: str
+    log_format: str
 
 
 @dataclass(frozen=True)

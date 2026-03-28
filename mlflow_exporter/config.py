@@ -11,10 +11,14 @@ from mlflow_exporter.settings import (
     DEFAULT_BASELINE_INTERVAL_SECONDS,
     DEFAULT_EXPORTER_PORT,
     DEFAULT_LISTEN_ADDRESS,
+    DEFAULT_LOG_FORMAT,
+    DEFAULT_LOG_LEVEL,
     DEFAULT_MLFLOW_REQUEST_MAX_RETRIES,
     DEFAULT_MLFLOW_REQUEST_TIMEOUT_SECONDS,
     DEFAULT_POLL_INTERVAL_SECONDS,
     DEFAULT_TRACKING_URI,
+    VALID_LOG_FORMATS,
+    VALID_LOG_LEVELS,
     ExporterSettings,
 )
 
@@ -85,6 +89,18 @@ def parse_args(arguments: Optional[Sequence[str]] = None) -> ExporterSettings:
             )
         ),
     )
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        help="Logging verbosity (DEBUG, INFO, WARNING, ERROR, CRITICAL).",
+        default=os.getenv("LOG_LEVEL", DEFAULT_LOG_LEVEL),
+    )
+    parser.add_argument(
+        "--log-format",
+        type=str,
+        help="Log output format (text or json).",
+        default=os.getenv("LOG_FORMAT", DEFAULT_LOG_FORMAT),
+    )
     parsed = parser.parse_args(arguments)
     _validate_positive_argument(parser, parsed.timeout, "--timeout")
     _validate_positive_argument(
@@ -93,6 +109,8 @@ def parse_args(arguments: Optional[Sequence[str]] = None) -> ExporterSettings:
         "--baseline-interval",
     )
     _validate_port_argument(parser, parsed.port)
+    _validate_log_level(parser, parsed.log_level)
+    _validate_log_format(parser, parsed.log_format)
     return ExporterSettings(
         port=parsed.port,
         listen_address=parsed.listen_address,
@@ -101,6 +119,8 @@ def parse_args(arguments: Optional[Sequence[str]] = None) -> ExporterSettings:
         tracking_uri=parsed.mlflowurl,
         tracking_username=os.getenv("MLFLOW_TRACKING_USERNAME"),
         tracking_password=os.getenv("MLFLOW_TRACKING_PASSWORD"),
+        log_level=parsed.log_level.upper(),
+        log_format=parsed.log_format.lower(),
     )
 
 
@@ -118,6 +138,22 @@ def _validate_port_argument(
     """Reject ports outside the valid TCP user-space range."""
     if port <= 0 or port > 65_535:
         parser.error("--port must be between 1 and 65535")
+
+
+def _validate_log_level(parser: argparse.ArgumentParser, level: str) -> None:
+    """Reject unrecognised log-level values."""
+    if level.upper() not in VALID_LOG_LEVELS:
+        parser.error(
+            f"--log-level must be one of {', '.join(VALID_LOG_LEVELS)}"
+        )
+
+
+def _validate_log_format(parser: argparse.ArgumentParser, fmt: str) -> None:
+    """Reject unrecognised log-format values."""
+    if fmt.lower() not in VALID_LOG_FORMATS:
+        parser.error(
+            f"--log-format must be one of {', '.join(VALID_LOG_FORMATS)}"
+        )
 
 
 def configure_mlflow_client(settings: ExporterSettings) -> MlflowClient:

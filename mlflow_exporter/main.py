@@ -9,6 +9,7 @@ from typing import Optional, Sequence
 
 from mlflow_exporter.collector import MlflowObservabilityCollector
 from mlflow_exporter.config import configure_mlflow_client, parse_args
+from mlflow_exporter.log import configure_logging
 from mlflow_exporter.metrics import PrometheusMetrics
 from mlflow_exporter.runtime import ExporterRuntime
 from mlflow_exporter.server import ExporterServer
@@ -47,11 +48,8 @@ def main(arguments: Optional[Sequence[str]] = None) -> None:
     arguments (Sequence[str] | None): Optional argument list passed through
         to ``parse_args``; defaults to ``sys.argv[1:]`` when ``None``.
     """
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-    )
     settings = parse_args(arguments)
+    configure_logging(settings.log_level, settings.log_format)
     LOGGER.info(
         "Starting exporter: tracking_uri=%s port=%d" " poll=%ds baseline=%ds",
         settings.tracking_uri,
