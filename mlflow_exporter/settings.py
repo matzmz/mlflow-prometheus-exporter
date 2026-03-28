@@ -49,17 +49,3 @@ class ExporterSettings:
     mlflow_request_max_retries: int
     log_level: str
     log_format: str
-
-
-@dataclass(frozen=True)
-class MlflowSnapshot:
-    """Aggregated MLflow state exported to Prometheus."""
-
-    experiments_total: int
-    experiments_active_total: int
-    experiments_deleted_total: int
-    runs_total: int
-    runs_by_status: dict[str, int]
-    registered_models_total: int
-    model_versions_total: int
-    model_versions_by_stage: dict[str, int]

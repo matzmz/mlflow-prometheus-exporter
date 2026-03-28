@@ -5,8 +5,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from mlflow_exporter.models import MlflowSnapshot
 from mlflow_exporter.runtime import ExporterRuntime
-from mlflow_exporter.settings import MlflowSnapshot
 from tests.helpers import make_settings, make_snapshot
 
 

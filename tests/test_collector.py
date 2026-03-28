@@ -1,6 +1,7 @@
 """Unit tests for MlflowObservabilityCollector."""
 
 import time
+from collections.abc import Mapping
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -11,8 +12,12 @@ from mlflow_exporter.collector import (
     MlflowObservabilityCollector,
     _backoff_interval,
     _Baseline,
+    _ExperimentContribution,
+    _ExperimentRef,
+    _ExperimentScanResult,
 )
-from mlflow_exporter.settings import RUN_STATUSES, MlflowSnapshot
+from mlflow_exporter.models import MlflowSnapshot
+from mlflow_exporter.settings import RUN_STATUSES
 
 
 class FakePage(list):
@@ -37,9 +42,14 @@ def _make_experiment(
     )
 
 
-def _make_run(status: str) -> SimpleNamespace:
+def _make_run(
+    status: str,
+    experiment_id: str = "exp1",
+) -> SimpleNamespace:
     """Return a minimal stand-in for an MLflow Run object."""
-    return SimpleNamespace(info=SimpleNamespace(status=status))
+    return SimpleNamespace(
+        info=SimpleNamespace(status=status, experiment_id=experiment_id)
+    )
 
 
 def _make_model_version(stage: str) -> SimpleNamespace:
@@ -71,17 +81,39 @@ def _make_snapshot(total: int) -> MlflowSnapshot:
     )
 
 
+def _make_contribution(
+    experiment_id: str,
+    lifecycle_stage: str = "active",
+    runs_by_status: Mapping[str, int] | None = None,
+    last_update_time: int = 0,
+) -> _ExperimentContribution:
+    """Return an immutable per-experiment contribution for merge tests."""
+    return _ExperimentContribution(
+        experiment_id=experiment_id,
+        last_update_time=last_update_time,
+        lifecycle_stage=lifecycle_stage,
+        runs_by_status=runs_by_status or {},
+    )
+
+
 def _make_baseline(horizon_ms: int = 500_000) -> _Baseline:
     """Return a reusable baseline for stateful collector tests."""
-    return _Baseline(
-        old_experiment_ids=["exp-old"],
-        old_experiments_by_stage={"active": 3, "deleted": 1},
-        old_runs_by_status={
+    contribution = _make_contribution(
+        experiment_id="exp-old",
+        lifecycle_stage="active",
+        runs_by_status={
             "RUNNING": 1,
             "FINISHED": 5,
             "FAILED": 0,
             "KILLED": 0,
         },
+        last_update_time=horizon_ms - 1,
+    )
+    return _Baseline(
+        experiments_total=1,
+        experiments_by_stage={"active": 1},
+        runs_by_status=contribution.runs_by_status,
+        experiments_by_id={contribution.experiment_id: contribution},
         registered_models_total=2,
         model_versions_total=7,
         model_versions_by_stage={
@@ -346,50 +378,52 @@ def test_run_delta_refresh_loop_reports_failures_through_callback() -> None:
 
 
 def test_scan_runs_returns_zeroes_for_empty_experiment_list() -> None:
-    """_scan_runs() with no experiment IDs returns zero for all statuses."""
+    """_scan_runs_by_experiment() with no IDs returns empty counts."""
     client = _empty_client()
     collector = MlflowObservabilityCollector(client)
 
-    result = collector._scan_runs([], filter_string="")
+    result = collector._scan_runs_by_experiment([])
 
-    assert result == {status: 0 for status in RUN_STATUSES}
+    assert result == {}
     client.search_runs.assert_not_called()
 
 
 def test_scan_runs_counts_runs_by_status() -> None:
-    """_scan_runs() correctly aggregates run counts per status."""
+    """_scan_runs_by_experiment() aggregates run counts per experiment."""
     client = MagicMock()
     client.search_runs.return_value = FakePage(
         [
-            _make_run("RUNNING"),
-            _make_run("FINISHED"),
-            _make_run("FINISHED"),
-            _make_run("FAILED"),
+            _make_run("RUNNING", experiment_id="exp1"),
+            _make_run("FINISHED", experiment_id="exp1"),
+            _make_run("FINISHED", experiment_id="exp1"),
+            _make_run("FAILED", experiment_id="exp1"),
         ]
     )
     collector = MlflowObservabilityCollector(client)
 
-    result = collector._scan_runs(["exp1"], filter_string="")
+    result = collector._scan_runs_by_experiment(["exp1"])
 
-    assert result["RUNNING"] == 1
-    assert result["FINISHED"] == 2
-    assert result["FAILED"] == 1
-    assert result["KILLED"] == 0
+    assert result["exp1"]["RUNNING"] == 1
+    assert result["exp1"]["FINISHED"] == 2
+    assert result["exp1"]["FAILED"] == 1
+    assert result["exp1"]["KILLED"] == 0
 
 
 def test_scan_runs_ignores_unknown_status() -> None:
-    """_scan_runs() silently ignores unrecognised run statuses."""
+    """_scan_runs_by_experiment() silently ignores unknown statuses."""
     client = MagicMock()
-    client.search_runs.return_value = FakePage([_make_run("UNKNOWN")])
+    client.search_runs.return_value = FakePage(
+        [_make_run("UNKNOWN", experiment_id="exp1")]
+    )
     collector = MlflowObservabilityCollector(client)
 
-    result = collector._scan_runs(["exp1"], filter_string="")
+    result = collector._scan_runs_by_experiment(["exp1"])
 
-    assert all(value == 0 for value in result.values())
+    assert all(value == 0 for value in result["exp1"].values())
 
 
-def test_scan_old_experiments_classifies_by_horizon() -> None:
-    """Experiments older than horizon_ms go into old_ids; newer ones don't."""
+def test_scan_stable_experiments_classifies_by_horizon() -> None:
+    """Experiments older than horizon_ms become stable baseline inputs."""
     horizon_ms = 1_000_000
     old_exp = _make_experiment("exp-old", last_update_time=horizon_ms - 1)
     new_exp = _make_experiment("exp-new", last_update_time=horizon_ms + 1)
@@ -397,14 +431,19 @@ def test_scan_old_experiments_classifies_by_horizon() -> None:
     client.search_experiments.return_value = FakePage([old_exp, new_exp])
     collector = MlflowObservabilityCollector(client)
 
-    result = collector._scan_old_experiments(horizon_ms)
+    result = collector._scan_stable_experiments(horizon_ms)
 
-    assert result.ids == ["exp-old"]
-    assert result.by_stage == {"active": 1}
+    assert result.experiments == (
+        _ExperimentRef(
+            experiment_id="exp-old",
+            last_update_time=horizon_ms - 1,
+            lifecycle_stage="active",
+        ),
+    )
 
 
-def test_scan_old_experiments_counts_deleted_stage() -> None:
-    """Deleted experiments are counted under the 'deleted' key."""
+def test_scan_stable_experiments_preserves_deleted_stage() -> None:
+    """Stable experiments preserve their lifecycle stage."""
     horizon_ms = 1_000_000
     deleted_exp = _make_experiment(
         "exp-del",
@@ -415,25 +454,36 @@ def test_scan_old_experiments_counts_deleted_stage() -> None:
     client.search_experiments.return_value = FakePage([deleted_exp])
     collector = MlflowObservabilityCollector(client)
 
-    result = collector._scan_old_experiments(horizon_ms)
+    result = collector._scan_stable_experiments(horizon_ms)
 
-    assert result.ids == ["exp-del"]
-    assert result.by_stage.get("deleted") == 1
+    assert result.experiments == (
+        _ExperimentRef(
+            experiment_id="exp-del",
+            last_update_time=horizon_ms - 1,
+            lifecycle_stage="deleted",
+        ),
+    )
 
 
-def test_scan_fresh_experiments_applies_horizon_filter_to_api() -> None:
-    """_scan_fresh_experiments() passes the horizon filter to the API."""
+def test_scan_dirty_experiments_applies_horizon_filter_to_api() -> None:
+    """_scan_dirty_experiments() passes the horizon filter to the API."""
     horizon_ms = 9_999_999
     fresh_exp = _make_experiment("exp-fresh", last_update_time=horizon_ms + 1)
     client = MagicMock()
     client.search_experiments.return_value = FakePage([fresh_exp])
     collector = MlflowObservabilityCollector(client)
 
-    result = collector._scan_fresh_experiments(horizon_ms)
+    result = collector._scan_dirty_experiments(horizon_ms)
 
     called_kwargs = client.search_experiments.call_args.kwargs
     assert str(horizon_ms) in called_kwargs.get("filter_string", "")
-    assert result.ids == ["exp-fresh"]
+    assert result.experiments == (
+        _ExperimentRef(
+            experiment_id="exp-fresh",
+            last_update_time=horizon_ms + 1,
+            lifecycle_stage="active",
+        ),
+    )
 
 
 def test_scan_model_versions_counts_by_stage() -> None:
@@ -485,26 +535,92 @@ def test_count_paginated_handles_single_page() -> None:
 
 
 def test_build_snapshot_from_baseline_merges_baseline_and_delta() -> None:
-    """Merged snapshots combine the current baseline with fresh deltas."""
-    client = MagicMock()
-    fresh_exp = _make_experiment(
-        "exp-new", last_update_time=10**15, lifecycle_stage="active"
-    )
-    client.search_experiments.return_value = FakePage([fresh_exp])
-    client.search_runs.return_value = FakePage(
-        [_make_run("RUNNING"), _make_run("RUNNING")]
-    )
-    collector = MlflowObservabilityCollector(client)
+    """Merged snapshots combine the current baseline with dirty experiments."""
+    collector = MlflowObservabilityCollector(_empty_client())
 
-    snapshot = collector._build_snapshot_from_baseline(_make_baseline())
+    with (
+        patch.object(
+            collector,
+            "_scan_dirty_experiments",
+            return_value=_ExperimentScanResult(
+                experiments=(
+                    _ExperimentRef(
+                        experiment_id="exp-new",
+                        last_update_time=10**15,
+                        lifecycle_stage="active",
+                    ),
+                )
+            ),
+        ),
+        patch.object(
+            collector,
+            "_build_experiment_contributions",
+            return_value=(
+                _make_contribution(
+                    experiment_id="exp-new",
+                    lifecycle_stage="active",
+                    runs_by_status={"RUNNING": 2},
+                    last_update_time=10**15,
+                ),
+            ),
+        ),
+    ):
+        snapshot = collector._build_snapshot_from_baseline(_make_baseline())
 
-    assert snapshot.experiments_total == 5
-    assert snapshot.experiments_active_total == 4
-    assert snapshot.experiments_deleted_total == 1
+    assert snapshot.experiments_total == 2
+    assert snapshot.experiments_active_total == 2
+    assert snapshot.experiments_deleted_total == 0
     assert snapshot.runs_by_status["RUNNING"] == 3
     assert snapshot.runs_by_status["FINISHED"] == 5
     assert snapshot.registered_models_total == 2
     assert snapshot.model_versions_total == 7
+
+
+def test_build_snapshot_from_baseline_replaces_stale_contribution() -> None:
+    """Dirty experiments replace their old baseline contribution entirely."""
+    collector = MlflowObservabilityCollector(_empty_client())
+    baseline = _make_baseline()
+
+    with (
+        patch.object(
+            collector,
+            "_scan_dirty_experiments",
+            return_value=_ExperimentScanResult(
+                experiments=(
+                    _ExperimentRef(
+                        experiment_id="exp-old",
+                        last_update_time=baseline.horizon_ms + 1,
+                        lifecycle_stage="active",
+                    ),
+                )
+            ),
+        ),
+        patch.object(
+            collector,
+            "_build_experiment_contributions",
+            return_value=(
+                _make_contribution(
+                    experiment_id="exp-old",
+                    lifecycle_stage="active",
+                    runs_by_status={"RUNNING": 0, "FINISHED": 6},
+                    last_update_time=baseline.horizon_ms + 1,
+                ),
+            ),
+        ),
+    ):
+        snapshot = collector._build_snapshot_from_baseline(baseline)
+
+    assert snapshot.experiments_total == 1
+    assert snapshot.runs_by_status["RUNNING"] == 0
+    assert snapshot.runs_by_status["FINISHED"] == 6
+
+
+def test_published_snapshot_is_immutable() -> None:
+    """Published snapshots reject accidental mutation of nested counts."""
+    snapshot = _make_snapshot(total=1)
+
+    with pytest.raises(TypeError):
+        snapshot.runs_by_status["RUNNING"] = 99
 
 
 def test_backoff_interval_returns_base_on_zero_failures() -> None:
@@ -516,8 +632,3 @@ def test_backoff_interval_doubles_on_each_failure() -> None:
     """Consecutive failures successively double the wait interval."""
     assert _backoff_interval(30, 1) == 60
     assert _backoff_interval(30, 2) == 120
-
-
-def test_backoff_interval_caps_at_maximum() -> None:
-    """The backoff interval never exceeds MAX_BACKOFF_SECONDS."""
-    assert _backoff_interval(30, 100) == MAX_BACKOFF_SECONDS

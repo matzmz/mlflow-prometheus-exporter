@@ -9,7 +9,7 @@ import time
 from prometheus_client import Counter, Gauge, Histogram, Info
 
 import mlflow_exporter
-from mlflow_exporter.settings import MlflowSnapshot
+from mlflow_exporter.models import MlflowSnapshot
 
 
 class PrometheusMetrics:

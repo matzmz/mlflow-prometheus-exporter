@@ -7,7 +7,7 @@ The collector keeps two refresh responsibilities separate:
 * **Baseline**: a complete rebuild of the stable state. It runs once
   during bootstrap and then periodically in a dedicated background thread.
 * **Delta refresh**: a lightweight merge against the latest published
-  baseline. It runs frequently and only re-scans data newer than the
+  baseline. It runs frequently and only re-scans experiments newer than the
   baseline horizon timestamp.
 
 Only one refresh is allowed to talk to MLflow at a time. If a periodic
@@ -18,13 +18,21 @@ serving the last published snapshot instead of blocking scrapes.
 import logging
 import threading
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import (
+    Callable,
+    Collection,
+    Iterable,
+    Mapping,
+    Sequence,
+)
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any, Optional
 
 from mlflow.entities import ViewType
 from mlflow.tracking import MlflowClient
 
+from mlflow_exporter.models import MlflowSnapshot
 from mlflow_exporter.settings import (
     BASELINE_INTERVAL_SECONDS,
     EXPERIMENT_PAGE_SIZE,
@@ -34,7 +42,6 @@ from mlflow_exporter.settings import (
     MODEL_VERSION_PAGE_SIZE,
     RUN_PAGE_SIZE,
     RUN_STATUSES,
-    MlflowSnapshot,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -48,26 +55,125 @@ def _backoff_interval(base_interval: int, consecutive_failures: int) -> int:
     return min(base_interval * (2**consecutive_failures), MAX_BACKOFF_SECONDS)
 
 
+def _normalise_run_counts(
+    counts: Optional[Mapping[str, int]] = None
+) -> dict[str, int]:
+    """Return counts initialised for every known run status."""
+    normalised = {status: 0 for status in RUN_STATUSES}
+    if counts is None:
+        return normalised
+    for status, count in counts.items():
+        if status in normalised:
+            normalised[status] = count
+    return normalised
+
+
+def _increment_stage_count(
+    counts: dict[str, int], lifecycle_stage: str
+) -> None:
+    """Increment the aggregate count for one lifecycle stage."""
+    counts[lifecycle_stage] = counts.get(lifecycle_stage, 0) + 1
+
+
+def _decrement_stage_count(
+    counts: dict[str, int], lifecycle_stage: str
+) -> None:
+    """Decrement the aggregate count for one lifecycle stage."""
+    if lifecycle_stage not in counts:
+        return
+    next_value = counts[lifecycle_stage] - 1
+    if next_value <= 0:
+        counts.pop(lifecycle_stage, None)
+        return
+    counts[lifecycle_stage] = next_value
+
+
+def _add_run_counts(
+    target: dict[str, int], counts: Mapping[str, int]
+) -> None:
+    """Add one experiment contribution into aggregate run counts."""
+    for status, count in _normalise_run_counts(counts).items():
+        target[status] = target.get(status, 0) + count
+
+
+def _subtract_run_counts(
+    target: dict[str, int], counts: Mapping[str, int]
+) -> None:
+    """Remove one experiment contribution from aggregate run counts."""
+    for status, count in _normalise_run_counts(counts).items():
+        target[status] = target.get(status, 0) - count
+
+
+@dataclass(frozen=True)
+class _ExperimentRef:
+    """Experiment metadata used to drive per-experiment recounts."""
+
+    experiment_id: str
+    last_update_time: int
+    lifecycle_stage: str
+
+
+@dataclass(frozen=True)
+class _ExperimentContribution:
+    """Immutable exported contribution of a single experiment."""
+
+    experiment_id: str
+    last_update_time: int
+    lifecycle_stage: str
+    runs_by_status: Mapping[str, int]
+
+    def __post_init__(self) -> None:
+        """Freeze nested counts to protect published state from mutation."""
+        object.__setattr__(
+            self,
+            "runs_by_status",
+            MappingProxyType(_normalise_run_counts(self.runs_by_status)),
+        )
+
+
 @dataclass(frozen=True)
 class _Baseline:
-    """Immutable snapshot of MLflow data older than the scan horizon."""
+    """Immutable baseline snapshot published by the collector."""
 
-    old_experiment_ids: list[str]
-    old_experiments_by_stage: dict[str, int]
-    old_runs_by_status: dict[str, int]
+    experiments_total: int
+    experiments_by_stage: Mapping[str, int]
+    runs_by_status: Mapping[str, int]
+    experiments_by_id: Mapping[str, _ExperimentContribution]
     registered_models_total: int
     model_versions_total: int
-    model_versions_by_stage: dict[str, int]
+    model_versions_by_stage: Mapping[str, int]
     horizon_ms: int
     built_at: float
+
+    def __post_init__(self) -> None:
+        """Freeze nested mappings so the baseline can be shared safely."""
+        object.__setattr__(
+            self,
+            "experiments_by_stage",
+            MappingProxyType(dict(self.experiments_by_stage)),
+        )
+        object.__setattr__(
+            self,
+            "runs_by_status",
+            MappingProxyType(_normalise_run_counts(self.runs_by_status)),
+        )
+        object.__setattr__(
+            self,
+            "experiments_by_id",
+            MappingProxyType(dict(self.experiments_by_id)),
+        )
+        object.__setattr__(
+            self,
+            "model_versions_by_stage",
+            MappingProxyType(dict(self.model_versions_by_stage)),
+        )
 
 
 @dataclass(frozen=True)
 class _ExperimentScanResult:
     """Result of scanning experiments against a time horizon."""
 
-    ids: list[str]
-    by_stage: dict[str, int]
+    experiments: tuple[_ExperimentRef, ...]
 
 
 @dataclass(frozen=True)
@@ -75,7 +181,15 @@ class _ModelVersionScanResult:
     """Result of scanning all model versions."""
 
     total: int
-    by_stage: dict[str, int]
+    by_stage: Mapping[str, int]
+
+    def __post_init__(self) -> None:
+        """Freeze aggregated stage counts after construction."""
+        object.__setattr__(
+            self,
+            "by_stage",
+            MappingProxyType(dict(self.by_stage)),
+        )
 
 
 @dataclass(frozen=True)
@@ -271,13 +385,16 @@ class MlflowObservabilityCollector:
         """Run a full scan and build the stable cache for data older than horizon.
 
         Returns:
-        _Baseline: Immutable snapshot covering all data up to the current horizon.
+        _Baseline: Immutable snapshot covering all data up to the current
+            horizon.
         """
         horizon_ms = self._horizon_ms()
-        old_experiments = self._scan_old_experiments(horizon_ms)
-        old_runs = self._scan_runs(
-            old_experiments.ids,
-            filter_string=f"attributes.start_time <= {horizon_ms}",
+        stable_experiments = self._scan_stable_experiments(horizon_ms)
+        stable_contributions = self._build_experiment_contributions(
+            stable_experiments.experiments
+        )
+        experiments_total, experiments_by_stage, runs_by_status = (
+            self._aggregate_experiment_contributions(stable_contributions)
         )
         model_versions = self._scan_model_versions()
         rm_total = self._count_paginated(
@@ -285,9 +402,13 @@ class MlflowObservabilityCollector:
             max_results=MODEL_PAGE_SIZE,
         )
         return _Baseline(
-            old_experiment_ids=old_experiments.ids,
-            old_experiments_by_stage=old_experiments.by_stage,
-            old_runs_by_status=old_runs,
+            experiments_total=experiments_total,
+            experiments_by_stage=experiments_by_stage,
+            runs_by_status=runs_by_status,
+            experiments_by_id={
+                contribution.experiment_id: contribution
+                for contribution in stable_contributions
+            },
             registered_models_total=rm_total,
             model_versions_total=model_versions.total,
             model_versions_by_stage=model_versions.by_stage,
@@ -301,51 +422,55 @@ class MlflowObservabilityCollector:
         """Merge the published baseline with a lightweight fresh-data scan.
 
         Returns:
-        MlflowSnapshot: Combined snapshot of old and recent MLflow data.
+        MlflowSnapshot: Combined snapshot of stable and recently updated
+            experiments.
         """
-        fresh = self._scan_fresh_experiments(baseline.horizon_ms)
-        fresh_runs = self._scan_runs(
-            baseline.old_experiment_ids + fresh.ids,
-            filter_string=f"attributes.start_time > {baseline.horizon_ms}",
+        dirty_experiments = self._scan_dirty_experiments(baseline.horizon_ms)
+        dirty_contributions = self._build_experiment_contributions(
+            dirty_experiments.experiments
         )
+        experiments_total = baseline.experiments_total
+        experiments_by_stage = dict(baseline.experiments_by_stage)
+        runs_by_status = _normalise_run_counts(baseline.runs_by_status)
+        for contribution in dirty_contributions:
+            previous = baseline.experiments_by_id.get(contribution.experiment_id)
+            if previous is None:
+                experiments_total += 1
+            else:
+                _decrement_stage_count(
+                    experiments_by_stage, previous.lifecycle_stage
+                )
+                _subtract_run_counts(runs_by_status, previous.runs_by_status)
+            _increment_stage_count(
+                experiments_by_stage, contribution.lifecycle_stage
+            )
+            _add_run_counts(runs_by_status, contribution.runs_by_status)
         return MlflowSnapshot(
-            experiments_total=(
-                sum(baseline.old_experiments_by_stage.values())
-                + sum(fresh.by_stage.values())
+            experiments_total=experiments_total,
+            experiments_active_total=experiments_by_stage.get("active", 0),
+            experiments_deleted_total=experiments_by_stage.get(
+                "deleted", 0
             ),
-            experiments_active_total=(
-                baseline.old_experiments_by_stage.get("active", 0)
-                + fresh.by_stage.get("active", 0)
-            ),
-            experiments_deleted_total=(
-                baseline.old_experiments_by_stage.get("deleted", 0)
-                + fresh.by_stage.get("deleted", 0)
-            ),
-            runs_total=(
-                sum(baseline.old_runs_by_status.values())
-                + sum(fresh_runs.values())
-            ),
-            runs_by_status={
-                status: baseline.old_runs_by_status.get(status, 0)
-                + fresh_runs.get(status, 0)
-                for status in RUN_STATUSES
-            },
+            runs_total=sum(runs_by_status.values()),
+            runs_by_status=runs_by_status,
             registered_models_total=baseline.registered_models_total,
             model_versions_total=baseline.model_versions_total,
             model_versions_by_stage=baseline.model_versions_by_stage,
         )
 
-    def _scan_old_experiments(self, horizon_ms: int) -> _ExperimentScanResult:
-        """Scan all experiments; return old IDs and old stage counts.
+    def _scan_stable_experiments(
+        self, horizon_ms: int
+    ) -> _ExperimentScanResult:
+        """Scan all experiments and return those stable at the horizon.
 
-        Classifies each experiment in Python by comparing its
-        last_update_time against horizon_ms, avoiding an extra API call.
+        Classifies each experiment in Python by comparing its last update time
+        against horizon_ms, avoiding an extra server-side filter for the stable
+        side of the baseline.
 
         Parameters:
         horizon_ms (int): Unix timestamp in ms used as the stable-data cutoff.
         """
-        ids: list[str] = []
-        by_stage: dict[str, int] = {}
+        experiments: list[_ExperimentRef] = []
         page_token = None
         while True:
             page = self._client.search_experiments(
@@ -356,23 +481,27 @@ class MlflowObservabilityCollector:
             for exp in page:
                 update_time = exp.last_update_time or 0
                 if update_time <= horizon_ms:
-                    ids.append(exp.experiment_id)
-                    stage = exp.lifecycle_stage or "active"
-                    by_stage[stage] = by_stage.get(stage, 0) + 1
+                    experiments.append(
+                        _ExperimentRef(
+                            experiment_id=exp.experiment_id,
+                            last_update_time=update_time,
+                            lifecycle_stage=exp.lifecycle_stage or "active",
+                        )
+                    )
             page_token = getattr(page, "token", None)
             if not page_token:
-                return _ExperimentScanResult(ids=ids, by_stage=by_stage)
+                return _ExperimentScanResult(experiments=tuple(experiments))
 
-    def _scan_fresh_experiments(
+    def _scan_dirty_experiments(
         self, horizon_ms: int
     ) -> _ExperimentScanResult:
-        """Fetch only experiments updated after horizon_ms (fast delta scan).
+        """Fetch experiments updated after horizon_ms for a full recount.
 
         Parameters:
-        horizon_ms (int): Unix timestamp in ms; only newer experiments are fetched.
+        horizon_ms (int): Unix timestamp in ms; only newer experiments are
+            fetched.
         """
-        ids: list[str] = []
-        by_stage: dict[str, int] = {}
+        experiments: list[_ExperimentRef] = []
         page_token = None
         while True:
             page = self._client.search_experiments(
@@ -382,45 +511,76 @@ class MlflowObservabilityCollector:
                 page_token=page_token,
             )
             for exp in page:
-                ids.append(exp.experiment_id)
-                stage = exp.lifecycle_stage or "active"
-                by_stage[stage] = by_stage.get(stage, 0) + 1
+                experiments.append(
+                    _ExperimentRef(
+                        experiment_id=exp.experiment_id,
+                        last_update_time=exp.last_update_time or 0,
+                        lifecycle_stage=exp.lifecycle_stage or "active",
+                    )
+                )
             page_token = getattr(page, "token", None)
             if not page_token:
-                return _ExperimentScanResult(ids=ids, by_stage=by_stage)
+                return _ExperimentScanResult(experiments=tuple(experiments))
 
-    def _scan_runs(
-        self, experiment_ids: list[str], filter_string: str
-    ) -> dict[str, int]:
-        """Paginate runs matching filter_string and return counts by status.
+    def _build_experiment_contributions(
+        self, experiments: tuple[_ExperimentRef, ...]
+    ) -> tuple[_ExperimentContribution, ...]:
+        """Build immutable exported contributions for the given experiments."""
+        run_counts_by_experiment = self._scan_runs_by_experiment(
+            experiment.experiment_id for experiment in experiments
+        )
+        return tuple(
+            _ExperimentContribution(
+                experiment_id=experiment.experiment_id,
+                last_update_time=experiment.last_update_time,
+                lifecycle_stage=experiment.lifecycle_stage,
+                runs_by_status=run_counts_by_experiment.get(
+                    experiment.experiment_id,
+                    _normalise_run_counts(),
+                ),
+            )
+            for experiment in experiments
+        )
+
+    def _scan_runs_by_experiment(
+        self, experiment_ids: Collection[str] | Iterable[str]
+    ) -> dict[str, dict[str, int]]:
+        """Return run counts grouped by experiment and then by status.
 
         Parameters:
-        experiment_ids (list): Experiment IDs to scope the run search.
-        filter_string (str): MLflow filter expression applied to the run query
-            (e.g. ``"attributes.start_time > 1234567890000"``).
+        experiment_ids (Collection[str] | Iterable[str]): Experiment IDs to
+            scope the run search.
 
         Returns:
-        dict: Mapping of each status in RUN_STATUSES to its run count.
+        dict: Per-experiment run counts keyed first by experiment id and then
+            by run status.
         """
+        experiment_ids = tuple(dict.fromkeys(experiment_ids))
         if not experiment_ids:
-            return {status: 0 for status in RUN_STATUSES}
-        by_status: dict[str, int] = {status: 0 for status in RUN_STATUSES}
+            return {}
+        by_experiment: dict[str, dict[str, int]] = {
+            experiment_id: _normalise_run_counts()
+            for experiment_id in experiment_ids
+        }
         page_token = None
         while True:
             page = self._client.search_runs(
-                experiment_ids=list(experiment_ids),
-                filter_string=filter_string,
+                experiment_ids=sorted(experiment_ids),
+                filter_string="",
                 run_view_type=ViewType.ALL,
                 max_results=RUN_PAGE_SIZE,
                 page_token=page_token,
             )
             for run in page:
+                experiment_id = run.info.experiment_id
+                if experiment_id not in by_experiment:
+                    by_experiment[experiment_id] = _normalise_run_counts()
                 status = run.info.status
-                if status in by_status:
-                    by_status[status] += 1
+                if status in RUN_STATUSES:
+                    by_experiment[experiment_id][status] += 1
             page_token = getattr(page, "token", None)
             if not page_token:
-                return by_status
+                return by_experiment
 
     def _scan_model_versions(self) -> _ModelVersionScanResult:
         """Count all model versions and aggregate by stage."""
@@ -439,6 +599,22 @@ class MlflowObservabilityCollector:
             page_token = getattr(page, "token", None)
             if not page_token:
                 return _ModelVersionScanResult(total=total, by_stage=by_stage)
+
+    @staticmethod
+    def _aggregate_experiment_contributions(
+        contributions: Iterable[_ExperimentContribution],
+    ) -> tuple[int, dict[str, int], dict[str, int]]:
+        """Aggregate per-experiment contributions into snapshot totals."""
+        experiments_total = 0
+        experiments_by_stage: dict[str, int] = {}
+        runs_by_status = _normalise_run_counts()
+        for contribution in contributions:
+            experiments_total += 1
+            _increment_stage_count(
+                experiments_by_stage, contribution.lifecycle_stage
+            )
+            _add_run_counts(runs_by_status, contribution.runs_by_status)
+        return experiments_total, experiments_by_stage, runs_by_status
 
     @staticmethod
     def _count_paginated(

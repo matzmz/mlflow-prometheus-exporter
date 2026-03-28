@@ -1,10 +1,10 @@
 """Shared test factory functions for the mlflow_exporter test suite."""
 
+from mlflow_exporter.models import MlflowSnapshot
 from mlflow_exporter.settings import (
     MODEL_STAGES,
     RUN_STATUSES,
     ExporterSettings,
-    MlflowSnapshot,
 )
 
 
