@@ -45,6 +45,8 @@ class ExporterSettings:
     tracking_uri: str
     tracking_username: Optional[str]
     tracking_password: Optional[str]
+    mlflow_request_timeout_seconds: int
+    mlflow_request_max_retries: int
     log_level: str
     log_format: str
 

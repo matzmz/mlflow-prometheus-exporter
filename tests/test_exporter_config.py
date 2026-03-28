@@ -34,6 +34,17 @@ def test_parse_args_reads_optional_tracking_credentials(monkeypatch):
     assert settings.tracking_password == "secret-api-key"
 
 
+def test_parse_args_reads_mlflow_http_settings(monkeypatch) -> None:
+    """Load MLflow HTTP timeout and retry settings into ExporterSettings."""
+    monkeypatch.setenv("MLFLOW_HTTP_REQUEST_TIMEOUT", "45")
+    monkeypatch.setenv("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "7")
+
+    settings = parse_args([])
+
+    assert settings.mlflow_request_timeout_seconds == 45
+    assert settings.mlflow_request_max_retries == 7
+
+
 def test_configure_mlflow_client_applies_credentials(monkeypatch):
     """Expose resolved MLflow connection settings through standard env vars."""
     settings = ExporterSettings(
@@ -44,6 +55,8 @@ def test_configure_mlflow_client_applies_credentials(monkeypatch):
         tracking_uri="https://tracking.example",
         tracking_username="name.lastname@example.com",
         tracking_password="secret-api-key",
+        mlflow_request_timeout_seconds=45,
+        mlflow_request_max_retries=7,
         log_level="INFO",
         log_format="text",
     )
@@ -56,6 +69,8 @@ def test_configure_mlflow_client_applies_credentials(monkeypatch):
     assert client.tracking_uri == "https://tracking.example"
     assert mock_set_uri.call_args.args == ("https://tracking.example",)
     assert os.environ["MLFLOW_TRACKING_URI"] == "https://tracking.example"
+    assert os.environ["MLFLOW_HTTP_REQUEST_TIMEOUT"] == "45"
+    assert os.environ["MLFLOW_HTTP_REQUEST_MAX_RETRIES"] == "7"
     assert (
         os.environ["MLFLOW_TRACKING_USERNAME"] == "name.lastname@example.com"
     )
@@ -94,6 +109,10 @@ def test_parse_args_accepts_cli_arguments() -> None:
             "60",
             "--baseline-interval",
             "600",
+            "--mlflow-request-timeout",
+            "15",
+            "--mlflow-request-max-retries",
+            "9",
         ]
     )
 
@@ -102,12 +121,14 @@ def test_parse_args_accepts_cli_arguments() -> None:
     assert settings.tracking_uri == "https://remote.example"
     assert settings.poll_interval_seconds == 60
     assert settings.baseline_interval_seconds == 600
+    assert settings.mlflow_request_timeout_seconds == 15
+    assert settings.mlflow_request_max_retries == 9
 
 
 def test_configure_mlflow_client_without_credentials(monkeypatch) -> None:
-    """configure_mlflow_client() does not set auth env vars when absent."""
-    monkeypatch.delenv("MLFLOW_TRACKING_USERNAME", raising=False)
-    monkeypatch.delenv("MLFLOW_TRACKING_PASSWORD", raising=False)
+    """configure_mlflow_client() clears stale auth env vars when absent."""
+    monkeypatch.setenv("MLFLOW_TRACKING_USERNAME", "stale-user")
+    monkeypatch.setenv("MLFLOW_TRACKING_PASSWORD", "stale-pass")
     settings = ExporterSettings(
         port=8000,
         listen_address="0.0.0.0",
@@ -116,6 +137,8 @@ def test_configure_mlflow_client_without_credentials(monkeypatch) -> None:
         tracking_uri="https://tracking.example",
         tracking_username=None,
         tracking_password=None,
+        mlflow_request_timeout_seconds=30,
+        mlflow_request_max_retries=3,
         log_level="INFO",
         log_format="text",
     )
@@ -146,6 +169,20 @@ def test_parse_args_rejects_invalid_port() -> None:
     with patch("argparse.ArgumentParser.error", side_effect=ValueError):
         with pytest.raises(ValueError):
             parse_args(["--port", "70000"])
+
+
+def test_parse_args_rejects_non_positive_mlflow_request_timeout() -> None:
+    """parse_args() rejects non-positive MLflow HTTP timeouts."""
+    with patch("argparse.ArgumentParser.error", side_effect=ValueError):
+        with pytest.raises(ValueError):
+            parse_args(["--mlflow-request-timeout", "0"])
+
+
+def test_parse_args_rejects_negative_mlflow_request_max_retries() -> None:
+    """parse_args() rejects negative MLflow HTTP retry limits."""
+    with patch("argparse.ArgumentParser.error", side_effect=ValueError):
+        with pytest.raises(ValueError):
+            parse_args(["--mlflow-request-max-retries", "-1"])
 
 
 def test_parse_args_accepts_log_level_and_format() -> None:

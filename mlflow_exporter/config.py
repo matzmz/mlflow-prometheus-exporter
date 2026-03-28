@@ -90,6 +90,28 @@ def parse_args(arguments: Optional[Sequence[str]] = None) -> ExporterSettings:
         ),
     )
     parser.add_argument(
+        "--mlflow-request-timeout",
+        type=int,
+        help="HTTP request timeout in seconds for MLflow API calls.",
+        default=int(
+            os.getenv(
+                "MLFLOW_HTTP_REQUEST_TIMEOUT",
+                DEFAULT_MLFLOW_REQUEST_TIMEOUT_SECONDS,
+            )
+        ),
+    )
+    parser.add_argument(
+        "--mlflow-request-max-retries",
+        type=int,
+        help="Maximum number of retries for failed MLflow API requests.",
+        default=int(
+            os.getenv(
+                "MLFLOW_HTTP_REQUEST_MAX_RETRIES",
+                DEFAULT_MLFLOW_REQUEST_MAX_RETRIES,
+            )
+        ),
+    )
+    parser.add_argument(
         "--log-level",
         type=str,
         help="Logging verbosity (DEBUG, INFO, WARNING, ERROR, CRITICAL).",
@@ -108,6 +130,16 @@ def parse_args(arguments: Optional[Sequence[str]] = None) -> ExporterSettings:
         parsed.baseline_interval,
         "--baseline-interval",
     )
+    _validate_positive_argument(
+        parser,
+        parsed.mlflow_request_timeout,
+        "--mlflow-request-timeout",
+    )
+    _validate_non_negative_argument(
+        parser,
+        parsed.mlflow_request_max_retries,
+        "--mlflow-request-max-retries",
+    )
     _validate_port_argument(parser, parsed.port)
     _validate_log_level(parser, parsed.log_level)
     _validate_log_format(parser, parsed.log_format)
@@ -119,6 +151,8 @@ def parse_args(arguments: Optional[Sequence[str]] = None) -> ExporterSettings:
         tracking_uri=parsed.mlflowurl,
         tracking_username=os.getenv("MLFLOW_TRACKING_USERNAME"),
         tracking_password=os.getenv("MLFLOW_TRACKING_PASSWORD"),
+        mlflow_request_timeout_seconds=parsed.mlflow_request_timeout,
+        mlflow_request_max_retries=parsed.mlflow_request_max_retries,
         log_level=parsed.log_level.upper(),
         log_format=parsed.log_format.lower(),
     )
@@ -130,6 +164,14 @@ def _validate_positive_argument(
     """Reject non-positive integer runtime settings."""
     if value <= 0:
         parser.error(f"{argument_name} must be greater than 0")
+
+
+def _validate_non_negative_argument(
+    parser: argparse.ArgumentParser, value: int, argument_name: str
+) -> None:
+    """Reject negative integer runtime settings."""
+    if value < 0:
+        parser.error(f"{argument_name} must be greater than or equal to 0")
 
 
 def _validate_port_argument(
@@ -172,24 +214,26 @@ def configure_mlflow_client(settings: ExporterSettings) -> MlflowClient:
     """
     os.environ["MLFLOW_TRACKING_URI"] = settings.tracking_uri
     os.environ["MLFLOW_HTTP_REQUEST_TIMEOUT"] = str(
-        int(
-            os.getenv(
-                "MLFLOW_HTTP_REQUEST_TIMEOUT",
-                DEFAULT_MLFLOW_REQUEST_TIMEOUT_SECONDS,
-            )
-        )
+        settings.mlflow_request_timeout_seconds
     )
     os.environ["MLFLOW_HTTP_REQUEST_MAX_RETRIES"] = str(
-        int(
-            os.getenv(
-                "MLFLOW_HTTP_REQUEST_MAX_RETRIES",
-                DEFAULT_MLFLOW_REQUEST_MAX_RETRIES,
-            )
-        )
+        settings.mlflow_request_max_retries
     )
-    if settings.tracking_username:
-        os.environ["MLFLOW_TRACKING_USERNAME"] = settings.tracking_username
-    if settings.tracking_password:
-        os.environ["MLFLOW_TRACKING_PASSWORD"] = settings.tracking_password
+    _set_or_clear_environment_variable(
+        "MLFLOW_TRACKING_USERNAME", settings.tracking_username
+    )
+    _set_or_clear_environment_variable(
+        "MLFLOW_TRACKING_PASSWORD", settings.tracking_password
+    )
     mlflow.set_tracking_uri(settings.tracking_uri)
     return MlflowClient(tracking_uri=settings.tracking_uri)
+
+
+def _set_or_clear_environment_variable(
+    name: str, value: Optional[str]
+) -> None:
+    """Write an environment variable deterministically from settings."""
+    if value is None:
+        os.environ.pop(name, None)
+        return
+    os.environ[name] = value

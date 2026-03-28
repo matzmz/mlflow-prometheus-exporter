@@ -64,7 +64,7 @@ Model-registry data (registered models and model versions) has no timestamp filt
 
 ## Configuration
 
-All settings can be provided through **CLI arguments** or **environment variables**. CLI arguments take precedence over environment variables.
+Operational settings can be provided through **CLI arguments** or **environment variables**. CLI arguments take precedence over environment variables. Sensitive authentication values remain environment-variable based.
 
 | CLI argument | Environment variable | Default | Description |
 |---|---|---|---|
@@ -74,10 +74,10 @@ All settings can be provided through **CLI arguments** or **environment variable
 | — | `MLFLOW_URL` | — | Legacy fallback URI (used when `MLFLOW_TRACKING_URI` is not set) |
 | `-t` / `--timeout` | `TIMEOUT` | `30` | Poll interval in seconds |
 | `--baseline-interval` | `BASELINE_INTERVAL_SECONDS` | `3600` | Baseline rebuild interval in seconds |
+| `--mlflow-request-timeout` | `MLFLOW_HTTP_REQUEST_TIMEOUT` | `30` | HTTP request timeout in seconds for MLflow API calls |
+| `--mlflow-request-max-retries` | `MLFLOW_HTTP_REQUEST_MAX_RETRIES` | `3` | Maximum number of retries for failed MLflow API requests |
 | — | `MLFLOW_TRACKING_USERNAME` | — | Username for MLflow basic authentication |
 | — | `MLFLOW_TRACKING_PASSWORD` | — | Password or API key for MLflow basic authentication |
-| — | `MLFLOW_HTTP_REQUEST_TIMEOUT` | `30` | HTTP request timeout in seconds for MLflow API calls |
-| — | `MLFLOW_HTTP_REQUEST_MAX_RETRIES` | `3` | Maximum number of retries for failed MLflow API requests |
 
 
 ## Running

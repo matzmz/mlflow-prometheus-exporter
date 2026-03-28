@@ -18,6 +18,8 @@ def make_settings(**overrides: object) -> ExporterSettings:
         tracking_uri="http://localhost:5000/",
         tracking_username=None,
         tracking_password=None,
+        mlflow_request_timeout_seconds=30,
+        mlflow_request_max_retries=3,
         log_level="INFO",
         log_format="text",
     )
