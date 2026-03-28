@@ -1,5 +1,3 @@
-
-
 """Integration tests for testing mlflow exporter with local MLflow server."""
 
 import socket

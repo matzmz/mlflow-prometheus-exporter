@@ -1,5 +1,3 @@
-
-
 """Unit tests for exporter configuration helpers."""
 
 import os

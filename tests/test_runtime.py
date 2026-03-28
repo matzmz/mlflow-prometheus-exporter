@@ -1,4 +1,3 @@
-
 """Unit tests for the exporter runtime service."""
 
 from typing import cast
@@ -8,7 +7,6 @@ import pytest
 
 from mlflow_exporter.runtime import ExporterRuntime
 from mlflow_exporter.settings import MlflowSnapshot
-
 from tests.helpers import make_settings, make_snapshot
 
 

@@ -1,5 +1,3 @@
-
-
 """Unit tests for PrometheusMetrics."""
 
 from typing import Any, Generator
@@ -9,7 +7,6 @@ import pytest
 
 from mlflow_exporter.metrics import PrometheusMetrics
 from mlflow_exporter.settings import MODEL_STAGES, RUN_STATUSES
-
 from tests.helpers import make_snapshot
 
 

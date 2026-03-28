@@ -1,5 +1,3 @@
-
-
 """Runtime service for the MLflow Prometheus exporter."""
 
 import logging

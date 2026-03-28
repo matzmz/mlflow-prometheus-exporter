@@ -1,5 +1,3 @@
-
-
 """Unit tests for MlflowObservabilityCollector."""
 
 import time
@@ -11,8 +9,8 @@ import pytest
 from mlflow_exporter.collector import (
     MAX_BACKOFF_SECONDS,
     MlflowObservabilityCollector,
-    _Baseline,
     _backoff_interval,
+    _Baseline,
 )
 from mlflow_exporter.settings import RUN_STATUSES, MlflowSnapshot
 

@@ -53,8 +53,7 @@ def main(arguments: Optional[Sequence[str]] = None) -> None:
     )
     settings = parse_args(arguments)
     LOGGER.info(
-        "Starting exporter: tracking_uri=%s port=%d"
-        " poll=%ds baseline=%ds",
+        "Starting exporter: tracking_uri=%s port=%d" " poll=%ds baseline=%ds",
         settings.tracking_uri,
         settings.port,
         settings.poll_interval_seconds,

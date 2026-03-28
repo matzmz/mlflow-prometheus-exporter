@@ -1,10 +1,8 @@
-
 """Unit tests for the mlflow_exporter orchestrator module."""
 
 from unittest.mock import MagicMock, patch
 
 from mlflow_exporter.main import build_runtime, main
-
 from tests.helpers import make_settings
 
 _MOD = "mlflow_exporter.main"
