@@ -52,9 +52,15 @@ jobs:
 
       - name: Smoke-test the image
         run: |
-          docker run --rm -d -p 8000:8000 "${IMAGE_LC}:${{ github.sha }}"
-          sleep 5
-          curl -I --fail http://localhost:8000/metrics
+          CID=$(docker run --rm -d \
+            -e MLFLOW_TRACKING_URI=/tmp/mlruns \
+            -p 8000:8000 \
+            "${IMAGE_LC}:${{ github.sha }}")
+          sleep 10
+          curl --fail http://localhost:8000/healthz
+          curl --fail http://localhost:8000/readyz
+          curl --fail http://localhost:8000/metrics
+          docker stop "$CID"
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
