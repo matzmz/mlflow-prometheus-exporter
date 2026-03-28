@@ -1,23 +1,21 @@
 #!/usr/bin/env python3
 
 
-"""MLflow observability data collector with time-based caching.
+"""MLflow observability data collector with coordinated baseline+delta refreshes.
 
 Polling strategy
 ----------------
-The collector separates MLflow data into two zones:
+The collector keeps two refresh responsibilities separate:
 
-* **Baseline** (old data, ``last_update_time <= horizon_ms``): rebuilt
-  once every *cache_ttl_seconds* (default 1 h). These records are
-  stable: finished runs do not change status, deleted experiments stay
-  deleted.
-* **Delta** (fresh data, ``last_update_time > horizon_ms``): re-scanned
-  on every poll cycle (default 30 s). In a mature deployment this set
-  is tiny compared to the full history.
+* **Baseline**: a complete rebuild of the stable state. It runs once
+  during bootstrap and then periodically in a dedicated background thread.
+* **Delta refresh**: a lightweight merge against the latest published
+  baseline. It runs frequently and only re-scans data newer than the
+  baseline horizon timestamp.
 
-Model-registry entities (registered models, model versions) have no
-timestamp filter in the MLflow API, so they are always taken from the
-baseline and refreshed only at cache-rebuild time.
+Only one refresh is allowed to talk to MLflow at a time. If a periodic
+refresh collides with another long-running refresh, the exporter keeps
+serving the last published snapshot instead of blocking scrapes.
 """
 
 import logging
@@ -30,7 +28,7 @@ from mlflow.entities import ViewType
 from mlflow.tracking import MlflowClient
 
 from mlflow_exporter.settings import (
-    CACHE_TTL_SECONDS,
+    BASELINE_INTERVAL_SECONDS,
     EXPERIMENT_PAGE_SIZE,
     HORIZON_DAYS,
     MODEL_PAGE_SIZE,
@@ -58,73 +56,170 @@ class _Baseline:
     built_at: float
 
 
+@dataclass(frozen=True)
+class _PublishedState:
+    """Atomically published exporter state."""
+
+    baseline: _Baseline
+    snapshot: MlflowSnapshot
+
+
 class MlflowObservabilityCollector:
     """Collect aggregated observability data from an MLflow tracking server."""
 
     def __init__(
         self,
         client: MlflowClient,
-        cache_ttl_seconds: int = CACHE_TTL_SECONDS,
+        baseline_interval_seconds: int = BASELINE_INTERVAL_SECONDS,
         horizon_days: int = HORIZON_DAYS,
     ) -> None:
-        """Configure the collector with an MLflow client and cache settings.
+        """Configure the collector with an MLflow client and refresh policy.
 
         Parameters:
         client (MlflowClient): Authenticated MLflow tracking client.
-        cache_ttl_seconds (int): Seconds before the stable baseline is rebuilt
-            in the background. Defaults to CACHE_TTL_SECONDS.
-        horizon_days (int): Age in days above which data is considered stable
-            and cached in the baseline. Defaults to HORIZON_DAYS.
+        baseline_interval_seconds (int): Seconds between background
+            baseline rebuilds.
+        horizon_days (int): Age in days above which data is considered
+            stable and stored in the published baseline.
         """
         self._client = client
-        self._cache_ttl_seconds = cache_ttl_seconds
+        self._baseline_interval_seconds = baseline_interval_seconds
         self._horizon_days = horizon_days
-        self._baseline: Optional[_Baseline] = None
-        self._lock = threading.Lock()
-        self._rebuild_in_progress = False
+        self._refresh_lock = threading.Lock()
+        self._state_lock = threading.Lock()
+        self._state: Optional[_PublishedState] = None
+        self._stop_event = threading.Event()
+        self._worker_lock = threading.Lock()
+        self._baseline_thread: Optional[threading.Thread] = None
 
-    def collect(self) -> MlflowSnapshot:
-        """Return a snapshot, triggering a background baseline rebuild when stale.
+    def initialize(self) -> MlflowSnapshot:
+        """Build and publish the first baseline before serving traffic."""
+        snapshot = self._run_baseline_cycle(blocking=True)
+        assert snapshot is not None
+        return snapshot
 
-        The first call blocks until a full baseline is available. Subsequent
-        calls return immediately from the cached baseline; if the baseline is
-        stale, a background thread rebuilds it so polls stay non-blocking.
+    def start_baseline_worker(self) -> None:
+        """Start the background baseline worker exactly once."""
+        self.start_baseline_worker_with_callbacks(
+            on_snapshot=lambda _snapshot, _duration_seconds: None,
+            on_failure=lambda _duration_seconds: None,
+        )
 
-        Returns:
-        MlflowSnapshot: Aggregated observability data from the MLflow server.
+    def start_baseline_worker_with_callbacks(
+        self,
+        on_snapshot: Callable[[MlflowSnapshot, float], None],
+        on_failure: Callable[[float], None],
+    ) -> None:
+        """Start the background baseline worker exactly once."""
+        with self._worker_lock:
+            if self._baseline_thread is not None:
+                return
+            thread = threading.Thread(
+                target=self._run_baseline_loop,
+                kwargs={
+                    "on_snapshot": on_snapshot,
+                    "on_failure": on_failure,
+                },
+                name="baseline",
+                daemon=True,
+            )
+            thread.start()
+            self._baseline_thread = thread
+
+    def stop(self) -> None:
+        """Request background workers to stop on the next wait boundary."""
+        self._stop_event.set()
+
+    def current_snapshot(self) -> MlflowSnapshot:
+        """Return the last published snapshot.
+
+        Raises:
+        RuntimeError: If the collector has not completed bootstrap yet.
         """
-        if self._baseline is None:
-            self._swap_baseline(self._build_baseline())
-        elif self._is_stale() and not self._rebuild_in_progress:
-            self._start_background_rebuild()
-        return self._compute_snapshot()
+        with self._state_lock:
+            if self._state is None:
+                raise RuntimeError("Collector is not initialized")
+            return self._state.snapshot
 
-    def _is_stale(self) -> bool:
-        """Return True when the baseline has exceeded its time-to-live."""
-        assert self._baseline is not None
-        age = time.monotonic() - self._baseline.built_at
-        return age > self._cache_ttl_seconds
-
-    def _swap_baseline(self, new_baseline: _Baseline) -> None:
-        """Atomically replace the baseline under the write lock."""
-        with self._lock:
-            self._baseline = new_baseline
-
-    def _start_background_rebuild(self) -> None:
-        """Fire a daemon thread to rebuild the baseline without blocking polls."""
-        self._rebuild_in_progress = True
-        thread = threading.Thread(target=self._rebuild_and_swap, daemon=True)
-        thread.start()
-
-    def _rebuild_and_swap(self) -> None:
-        """Run a full baseline scan and atomically publish the result."""
+    def refresh_delta_snapshot(self) -> MlflowSnapshot:
+        """Refresh the delta view, or return stale data during contention."""
+        published = self._get_published_state()
+        if published is None:
+            raise RuntimeError("Collector is not initialized")
+        if not self._refresh_lock.acquire(blocking=False):
+            return published.snapshot
         try:
-            new_baseline = self._build_baseline()
-            self._swap_baseline(new_baseline)
-        except Exception:
-            LOGGER.exception("Background baseline rebuild failed")
+            published = self._get_published_state()
+            assert published is not None
+            snapshot = self._build_snapshot_from_baseline(published.baseline)
+            self._publish_state(published.baseline, snapshot)
+            return snapshot
         finally:
-            self._rebuild_in_progress = False
+            self._refresh_lock.release()
+
+    def run_delta_refresh_loop(
+        self,
+        poll_interval_seconds: int,
+        on_snapshot: Callable[[MlflowSnapshot, float], None],
+        on_failure: Callable[[float], None],
+    ) -> None:
+        """Refresh delta state forever and report outcomes through callbacks."""
+        while not self._wait_for_next_delta_cycle(poll_interval_seconds):
+            started = time.monotonic()
+            try:
+                snapshot = self.refresh_delta_snapshot()
+                on_snapshot(snapshot, time.monotonic() - started)
+            except Exception:
+                on_failure(time.monotonic() - started)
+                LOGGER.exception("MLflow delta refresh failed")
+
+    def _run_baseline_loop(
+        self,
+        on_snapshot: Callable[[MlflowSnapshot, float], None],
+        on_failure: Callable[[float], None],
+    ) -> None:
+        """Periodically rebuild and publish the baseline."""
+        while not self._wait_for_next_baseline_cycle():
+            started = time.monotonic()
+            try:
+                snapshot = self._run_baseline_cycle(blocking=False)
+                if snapshot is not None:
+                    on_snapshot(snapshot, time.monotonic() - started)
+            except Exception:
+                on_failure(time.monotonic() - started)
+                LOGGER.exception("Background baseline refresh failed")
+
+    def _wait_for_next_baseline_cycle(self) -> bool:
+        """Wait for the next baseline cycle or a stop request."""
+        return self._stop_event.wait(self._baseline_interval_seconds)
+
+    def _wait_for_next_delta_cycle(self, poll_interval_seconds: int) -> bool:
+        """Wait for the next delta cycle or a stop request."""
+        return self._stop_event.wait(poll_interval_seconds)
+
+    def _run_baseline_cycle(self, blocking: bool) -> Optional[MlflowSnapshot]:
+        """Build a baseline and publish a matching merged snapshot."""
+        if not self._refresh_lock.acquire(blocking=blocking):
+            return None
+        try:
+            baseline = self._build_baseline()
+            snapshot = self._build_snapshot_from_baseline(baseline)
+            self._publish_state(baseline, snapshot)
+            return snapshot
+        finally:
+            self._refresh_lock.release()
+
+    def _get_published_state(self) -> Optional[_PublishedState]:
+        """Return the latest published state under the state lock."""
+        with self._state_lock:
+            return self._state
+
+    def _publish_state(
+        self, baseline: _Baseline, snapshot: MlflowSnapshot
+    ) -> None:
+        """Atomically publish a baseline/snapshot pair."""
+        with self._state_lock:
+            self._state = _PublishedState(baseline=baseline, snapshot=snapshot)
 
     def _horizon_ms(self) -> int:
         """Return the Unix timestamp in ms below which data is treated as stable.
@@ -162,45 +257,46 @@ class MlflowObservabilityCollector:
             built_at=time.monotonic(),
         )
 
-    def _compute_snapshot(self) -> MlflowSnapshot:
-        """Merge the stable baseline with a lightweight fresh-data delta scan.
+    def _build_snapshot_from_baseline(
+        self, baseline: _Baseline
+    ) -> MlflowSnapshot:
+        """Merge the published baseline with a lightweight fresh-data scan.
 
         Returns:
         MlflowSnapshot: Combined snapshot of old and recent MLflow data.
         """
-        with self._lock:
-            bl = self._baseline
-        assert bl is not None
         fresh_exp_ids, fresh_exp_by_stage = self._scan_fresh_experiments(
-            bl.horizon_ms
+            baseline.horizon_ms
         )
         fresh_runs = self._scan_runs(
-            bl.old_experiment_ids + fresh_exp_ids,
-            filter_string=f"attributes.start_time > {bl.horizon_ms}",
+            baseline.old_experiment_ids + fresh_exp_ids,
+            filter_string=f"attributes.start_time > {baseline.horizon_ms}",
         )
         return MlflowSnapshot(
             experiments_total=(
-                sum(bl.old_experiments_by_stage.values())
+                sum(baseline.old_experiments_by_stage.values())
                 + sum(fresh_exp_by_stage.values())
             ),
             experiments_active_total=(
-                bl.old_experiments_by_stage.get("active", 0)
+                baseline.old_experiments_by_stage.get("active", 0)
                 + fresh_exp_by_stage.get("active", 0)
             ),
             experiments_deleted_total=(
-                bl.old_experiments_by_stage.get("deleted", 0)
+                baseline.old_experiments_by_stage.get("deleted", 0)
                 + fresh_exp_by_stage.get("deleted", 0)
             ),
             runs_total=(
-                sum(bl.old_runs_by_status.values()) + sum(fresh_runs.values())
+                sum(baseline.old_runs_by_status.values())
+                + sum(fresh_runs.values())
             ),
             runs_by_status={
-                s: bl.old_runs_by_status.get(s, 0) + fresh_runs.get(s, 0)
-                for s in RUN_STATUSES
+                status: baseline.old_runs_by_status.get(status, 0)
+                + fresh_runs.get(status, 0)
+                for status in RUN_STATUSES
             },
-            registered_models_total=bl.registered_models_total,
-            model_versions_total=bl.model_versions_total,
-            model_versions_by_stage=bl.model_versions_by_stage,
+            registered_models_total=baseline.registered_models_total,
+            model_versions_total=baseline.model_versions_total,
+            model_versions_by_stage=baseline.model_versions_by_stage,
         )
 
     def _scan_old_experiments(self, horizon_ms: int) -> tuple:
@@ -274,8 +370,8 @@ class MlflowObservabilityCollector:
         dict: Mapping of each status in RUN_STATUSES to its run count.
         """
         if not experiment_ids:
-            return {s: 0 for s in RUN_STATUSES}
-        by_status: dict = {s: 0 for s in RUN_STATUSES}
+            return {status: 0 for status in RUN_STATUSES}
+        by_status: dict = {status: 0 for status in RUN_STATUSES}
         page_token = None
         while True:
             page = self._client.search_runs(
