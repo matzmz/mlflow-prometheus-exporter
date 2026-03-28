@@ -56,11 +56,9 @@ mlartifacts/
 # IDEs and editors
 .idea/
 .codex/
-.devcontainer/
 
 # Ignore everything in .github except workflow definitions
 .github/*
 !.github/workflows/
 .github/workflows/*
 !.github/workflows/*.yaml
-

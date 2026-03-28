@@ -1,0 +1,21 @@
+{
+  "name": "mlflow-prometheus-exporter",
+  "build": {
+    "context": "..",
+    "dockerfile": "./Dockerfile"
+  },
+  "workspaceFolder": "/workspaces/mlflow-prometheus-exporter",
+  "remoteUser": "vscode",
+  "postCreateCommand": "python3 -m venv .venv && .venv/bin/pip install --upgrade pip && .venv/bin/pip install tox && .venv/bin/pip install -e . -r requirements-fmt.in -r requirements-lint.in -r requirements-integration.in",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "python.defaultInterpreterPath": "${containerWorkspaceFolder}/.venv/bin/python"
+      },
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance"
+      ]
+    }
+  }
+}
