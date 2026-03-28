@@ -68,9 +68,10 @@ class ExporterRuntime:
             self.stop()
 
     def stop(self) -> None:
-        """Request a coordinated shutdown of collector-owned loops."""
+        """Request a coordinated shutdown of collector and HTTP server."""
         LOGGER.info("Stopping exporter")
         self._collector.stop()
+        self._server.stop()
 
     def _publish_snapshot(
         self, snapshot: MlflowSnapshot, duration_seconds: float

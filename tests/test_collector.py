@@ -1,5 +1,6 @@
 """Unit tests for MlflowObservabilityCollector."""
 
+import logging
 import time
 from collections.abc import Mapping
 from types import SimpleNamespace
@@ -409,17 +410,21 @@ def test_scan_runs_counts_runs_by_status() -> None:
     assert result["exp1"]["KILLED"] == 0
 
 
-def test_scan_runs_ignores_unknown_status() -> None:
-    """_scan_runs_by_experiment() silently ignores unknown statuses."""
+def test_scan_runs_ignores_unknown_status(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """_scan_runs_by_experiment() logs a warning for unknown statuses."""
     client = MagicMock()
     client.search_runs.return_value = FakePage(
         [_make_run("UNKNOWN", experiment_id="exp1")]
     )
     collector = MlflowObservabilityCollector(client)
 
-    result = collector._scan_runs_by_experiment(["exp1"])
+    with caplog.at_level(logging.WARNING):
+        result = collector._scan_runs_by_experiment(["exp1"])
 
     assert all(value == 0 for value in result["exp1"].values())
+    assert "UNKNOWN" in caplog.text
 
 
 def test_scan_stable_experiments_classifies_by_horizon() -> None:

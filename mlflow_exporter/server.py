@@ -1,5 +1,6 @@
 """HTTP server with /healthz, /readyz, and /metrics endpoints."""
 
+import logging
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Optional
@@ -55,6 +56,7 @@ class ExporterServer:
         self._registry = registry
         self._ready = threading.Event()
         self._httpd: Optional[HTTPServer] = None
+        self._logger = logging.getLogger(__name__)
 
     def start(self, port: int, addr: str = "0.0.0.0") -> None:
         """Bind and start the HTTP server in a daemon thread."""
@@ -70,6 +72,16 @@ class ExporterServer:
             name="http",
         )
         thread.start()
+
+    def stop(self) -> None:
+        """Shut down the HTTP server and release the bound socket."""
+        httpd = self._httpd
+        if httpd is None:
+            return
+        self._logger.info("Shutting down HTTP server")
+        httpd.shutdown()
+        httpd.server_close()
+        self._httpd = None
 
     def mark_ready(self) -> None:
         """Signal that the exporter has completed bootstrap."""

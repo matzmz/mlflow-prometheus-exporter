@@ -168,3 +168,23 @@ def test_runtime_stops_collector_when_run_exits() -> None:
         runtime.run()
 
     collector.stop.assert_called_once_with()
+
+
+def test_runtime_stops_http_server_when_run_exits() -> None:
+    """The runtime shuts down the HTTP server on exit."""
+    collector = MagicMock()
+    metrics = MagicMock()
+    server = MagicMock()
+    collector.initialize.return_value = make_snapshot()
+    collector.run_delta_refresh_loop.side_effect = StopIteration()
+    runtime = ExporterRuntime(
+        settings=make_settings(),
+        collector=collector,
+        metrics=metrics,
+        server=server,
+    )
+
+    with pytest.raises(StopIteration):
+        runtime.run()
+
+    server.stop.assert_called_once_with()

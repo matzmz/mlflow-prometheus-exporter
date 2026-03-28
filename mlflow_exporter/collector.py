@@ -56,7 +56,7 @@ def _backoff_interval(base_interval: int, consecutive_failures: int) -> int:
 
 
 def _normalise_run_counts(
-    counts: Optional[Mapping[str, int]] = None
+    counts: Optional[Mapping[str, int]] = None,
 ) -> dict[str, int]:
     """Return counts initialised for every known run status."""
     normalised = {status: 0 for status in RUN_STATUSES}
@@ -88,9 +88,7 @@ def _decrement_stage_count(
     counts[lifecycle_stage] = next_value
 
 
-def _add_run_counts(
-    target: dict[str, int], counts: Mapping[str, int]
-) -> None:
+def _add_run_counts(target: dict[str, int], counts: Mapping[str, int]) -> None:
     """Add one experiment contribution into aggregate run counts."""
     for status, count in _normalise_run_counts(counts).items():
         target[status] = target.get(status, 0) + count
@@ -433,7 +431,9 @@ class MlflowObservabilityCollector:
         experiments_by_stage = dict(baseline.experiments_by_stage)
         runs_by_status = _normalise_run_counts(baseline.runs_by_status)
         for contribution in dirty_contributions:
-            previous = baseline.experiments_by_id.get(contribution.experiment_id)
+            previous = baseline.experiments_by_id.get(
+                contribution.experiment_id
+            )
             if previous is None:
                 experiments_total += 1
             else:
@@ -448,9 +448,7 @@ class MlflowObservabilityCollector:
         return MlflowSnapshot(
             experiments_total=experiments_total,
             experiments_active_total=experiments_by_stage.get("active", 0),
-            experiments_deleted_total=experiments_by_stage.get(
-                "deleted", 0
-            ),
+            experiments_deleted_total=experiments_by_stage.get("deleted", 0),
             runs_total=sum(runs_by_status.values()),
             runs_by_status=runs_by_status,
             registered_models_total=baseline.registered_models_total,
@@ -578,6 +576,12 @@ class MlflowObservabilityCollector:
                 status = run.info.status
                 if status in RUN_STATUSES:
                     by_experiment[experiment_id][status] += 1
+                else:
+                    LOGGER.warning(
+                        "Ignoring unknown run status %r in" " experiment %s",
+                        status,
+                        experiment_id,
+                    )
             page_token = getattr(page, "token", None)
             if not page_token:
                 return by_experiment
