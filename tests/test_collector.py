@@ -397,10 +397,10 @@ def test_scan_old_experiments_classifies_by_horizon() -> None:
     client.search_experiments.return_value = FakePage([old_exp, new_exp])
     collector = MlflowObservabilityCollector(client)
 
-    old_ids, old_by_stage = collector._scan_old_experiments(horizon_ms)
+    result = collector._scan_old_experiments(horizon_ms)
 
-    assert old_ids == ["exp-old"]
-    assert old_by_stage == {"active": 1}
+    assert result.ids == ["exp-old"]
+    assert result.by_stage == {"active": 1}
 
 
 def test_scan_old_experiments_counts_deleted_stage() -> None:
@@ -415,10 +415,10 @@ def test_scan_old_experiments_counts_deleted_stage() -> None:
     client.search_experiments.return_value = FakePage([deleted_exp])
     collector = MlflowObservabilityCollector(client)
 
-    old_ids, old_by_stage = collector._scan_old_experiments(horizon_ms)
+    result = collector._scan_old_experiments(horizon_ms)
 
-    assert old_ids == ["exp-del"]
-    assert old_by_stage.get("deleted") == 1
+    assert result.ids == ["exp-del"]
+    assert result.by_stage.get("deleted") == 1
 
 
 def test_scan_fresh_experiments_applies_horizon_filter_to_api() -> None:
@@ -429,11 +429,11 @@ def test_scan_fresh_experiments_applies_horizon_filter_to_api() -> None:
     client.search_experiments.return_value = FakePage([fresh_exp])
     collector = MlflowObservabilityCollector(client)
 
-    ids, _ = collector._scan_fresh_experiments(horizon_ms)
+    result = collector._scan_fresh_experiments(horizon_ms)
 
     called_kwargs = client.search_experiments.call_args.kwargs
     assert str(horizon_ms) in called_kwargs.get("filter_string", "")
-    assert ids == ["exp-fresh"]
+    assert result.ids == ["exp-fresh"]
 
 
 def test_scan_model_versions_counts_by_stage() -> None:
@@ -449,12 +449,12 @@ def test_scan_model_versions_counts_by_stage() -> None:
     )
     collector = MlflowObservabilityCollector(client)
 
-    total, by_stage = collector._scan_model_versions()
+    result = collector._scan_model_versions()
 
-    assert total == 4
-    assert by_stage["Production"] == 2
-    assert by_stage["Staging"] == 1
-    assert by_stage["None"] == 1
+    assert result.total == 4
+    assert result.by_stage["Production"] == 2
+    assert result.by_stage["Staging"] == 1
+    assert result.by_stage["None"] == 1
 
 
 def test_count_paginated_accumulates_across_multiple_pages() -> None:
