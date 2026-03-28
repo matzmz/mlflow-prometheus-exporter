@@ -20,8 +20,9 @@ serving the last published snapshot instead of blocking scrapes.
 import logging
 import threading
 import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Sequence
+from typing import Any, Optional
 
 from mlflow.entities import ViewType
 from mlflow.tracking import MlflowClient
@@ -45,12 +46,12 @@ LOGGER = logging.getLogger(__name__)
 class _Baseline:
     """Immutable snapshot of MLflow data older than the scan horizon."""
 
-    old_experiment_ids: list
-    old_experiments_by_stage: dict
-    old_runs_by_status: dict
+    old_experiment_ids: list[str]
+    old_experiments_by_stage: dict[str, int]
+    old_runs_by_status: dict[str, int]
     registered_models_total: int
     model_versions_total: int
-    model_versions_by_stage: dict
+    model_versions_by_stage: dict[str, int]
     horizon_ms: int
     built_at: float
 
@@ -300,7 +301,9 @@ class MlflowObservabilityCollector:
             model_versions_by_stage=baseline.model_versions_by_stage,
         )
 
-    def _scan_old_experiments(self, horizon_ms: int) -> tuple:
+    def _scan_old_experiments(
+        self, horizon_ms: int
+    ) -> tuple[list[str], dict[str, int]]:
         """Scan all experiments; return old IDs and old stage counts.
 
         Classifies each experiment in Python by comparing its
@@ -313,8 +316,8 @@ class MlflowObservabilityCollector:
         tuple: A pair ``(old_ids, old_by_stage)`` where ``old_ids`` is a list
             of experiment IDs and ``old_by_stage`` maps lifecycle stage to count.
         """
-        old_ids: list = []
-        old_by_stage: dict = {}
+        old_ids: list[str] = []
+        old_by_stage: dict[str, int] = {}
         page_token = None
         while True:
             page = self._client.search_experiments(
@@ -331,7 +334,9 @@ class MlflowObservabilityCollector:
             if not page_token:
                 return old_ids, old_by_stage
 
-    def _scan_fresh_experiments(self, horizon_ms: int) -> tuple:
+    def _scan_fresh_experiments(
+        self, horizon_ms: int
+    ) -> tuple[list[str], dict[str, int]]:
         """Fetch only experiments updated after horizon_ms (fast delta scan).
 
         Parameters:
@@ -341,8 +346,8 @@ class MlflowObservabilityCollector:
         tuple: A pair ``(ids, by_stage)`` mirroring the shape returned by
             ``_scan_old_experiments`` but for recently updated experiments.
         """
-        ids: list = []
-        by_stage: dict = {}
+        ids: list[str] = []
+        by_stage: dict[str, int] = {}
         page_token = None
         while True:
             page = self._client.search_experiments(
@@ -359,7 +364,9 @@ class MlflowObservabilityCollector:
             if not page_token:
                 return ids, by_stage
 
-    def _scan_runs(self, experiment_ids: list, filter_string: str) -> dict:
+    def _scan_runs(
+        self, experiment_ids: list[str], filter_string: str
+    ) -> dict[str, int]:
         """Paginate runs matching filter_string and return counts by status.
 
         Parameters:
@@ -372,7 +379,7 @@ class MlflowObservabilityCollector:
         """
         if not experiment_ids:
             return {status: 0 for status in RUN_STATUSES}
-        by_status: dict = {status: 0 for status in RUN_STATUSES}
+        by_status: dict[str, int] = {status: 0 for status in RUN_STATUSES}
         page_token = None
         while True:
             page = self._client.search_runs(
@@ -390,7 +397,9 @@ class MlflowObservabilityCollector:
             if not page_token:
                 return by_status
 
-    def _scan_model_versions(self) -> tuple:
+    def _scan_model_versions(
+        self,
+    ) -> tuple[int, dict[str, int]]:
         """Count all model versions and aggregate by stage.
 
         Returns:
@@ -399,7 +408,7 @@ class MlflowObservabilityCollector:
         """
         page_token = None
         total = 0
-        by_stage = {stage: 0 for stage in MODEL_STAGES}
+        by_stage: dict[str, int] = {stage: 0 for stage in MODEL_STAGES}
         while True:
             page = self._client.search_model_versions(
                 max_results=MODEL_VERSION_PAGE_SIZE,

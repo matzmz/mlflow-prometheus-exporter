@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 
 
 """Runtime constants and typed configuration data structures."""
@@ -47,7 +48,7 @@ class MlflowSnapshot:
     experiments_active_total: int
     experiments_deleted_total: int
     runs_total: int
-    runs_by_status: dict
+    runs_by_status: dict[str, int]
     registered_models_total: int
     model_versions_total: int
-    model_versions_by_stage: dict
+    model_versions_by_stage: dict[str, int]
