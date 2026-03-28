@@ -18,7 +18,7 @@ class _ExporterHandler(BaseHTTPRequestHandler):
     _ready: threading.Event
     _registry: CollectorRegistry
 
-    def do_GET(self) -> None:
+    def do_GET(self) -> None:  # noqa: N802
         """Route GET requests to the appropriate handler."""
         if self.path == "/healthz":
             self._text_response(200, b"ok\n")
@@ -42,9 +42,7 @@ class _ExporterHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def log_message(
-        self, format: str, *args: object  # noqa: A002
-    ) -> None:
+    def log_message(self, format: str, *args: object) -> None:  # noqa: A002
         """Suppress default stderr access logging."""
         return
 
@@ -52,9 +50,7 @@ class _ExporterHandler(BaseHTTPRequestHandler):
 class ExporterServer:
     """HTTP server that exposes health probes and Prometheus metrics."""
 
-    def __init__(
-        self, registry: CollectorRegistry = REGISTRY
-    ) -> None:
+    def __init__(self, registry: CollectorRegistry = REGISTRY) -> None:
         """Prepare server state without starting any thread."""
         self._registry = registry
         self._ready = threading.Event()
