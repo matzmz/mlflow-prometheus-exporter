@@ -12,10 +12,6 @@ import pytest
 from mlflow_exporter.collector import MlflowObservabilityCollector, _Baseline
 from mlflow_exporter.settings import RUN_STATUSES, MlflowSnapshot
 
-# ---------------------------------------------------------------------------
-# Small helpers
-# ---------------------------------------------------------------------------
-
 
 class FakePage(list):
     """List with an optional pagination token, mimicking MLflow PagedList."""
@@ -59,160 +55,302 @@ def _empty_client() -> MagicMock:
     return client
 
 
-def _advance_monotonic(
-    monkeypatch: pytest.MonkeyPatch, seconds: float
-) -> None:
-    """Replace time.monotonic so it appears to advance by *seconds*."""
-    origin = time.monotonic()
-    monkeypatch.setattr(time, "monotonic", lambda: origin + seconds)
-
-
-# ---------------------------------------------------------------------------
-# collect() dispatch logic
-# ---------------------------------------------------------------------------
-
-
-def test_collect_builds_baseline_on_first_call() -> None:
-    """First collect() call blocks until a valid baseline is built."""
-    collector = MlflowObservabilityCollector(
-        _empty_client(), cache_ttl_seconds=3600
+def _make_snapshot(total: int) -> MlflowSnapshot:
+    """Return a minimal snapshot for state publication tests."""
+    return MlflowSnapshot(
+        experiments_total=total,
+        experiments_active_total=total,
+        experiments_deleted_total=0,
+        runs_total=total,
+        runs_by_status={status: total for status in RUN_STATUSES},
+        registered_models_total=total,
+        model_versions_total=total,
+        model_versions_by_stage={},
     )
 
-    snapshot = collector.collect()
 
-    assert collector._baseline is not None
-    assert isinstance(snapshot, MlflowSnapshot)
-
-
-def test_collect_uses_cached_baseline_when_fresh() -> None:
-    """Subsequent collect() calls reuse the cached baseline."""
-    collector = MlflowObservabilityCollector(
-        _empty_client(), cache_ttl_seconds=3600
+def _make_baseline(horizon_ms: int = 500_000) -> _Baseline:
+    """Return a reusable baseline for stateful collector tests."""
+    return _Baseline(
+        old_experiment_ids=["exp-old"],
+        old_experiments_by_stage={"active": 3, "deleted": 1},
+        old_runs_by_status={
+            "RUNNING": 1,
+            "FINISHED": 5,
+            "FAILED": 0,
+            "KILLED": 0,
+        },
+        registered_models_total=2,
+        model_versions_total=7,
+        model_versions_by_stage={
+            "Production": 3,
+            "Staging": 2,
+            "None": 2,
+            "Archived": 0,
+        },
+        horizon_ms=horizon_ms,
+        built_at=time.monotonic(),
     )
-    collector.collect()
-    baseline_after_first = collector._baseline
-
-    with patch.object(
-        collector, "_build_baseline", wraps=collector._build_baseline
-    ) as spy:
-        collector.collect()
-
-    spy.assert_not_called()
-    assert collector._baseline is baseline_after_first
 
 
-def test_collect_triggers_background_rebuild_when_stale(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """collect() fires a background rebuild when the baseline is stale."""
-    collector = MlflowObservabilityCollector(
-        _empty_client(), cache_ttl_seconds=1
-    )
-    collector.collect()
-    _advance_monotonic(monkeypatch, seconds=10)
+def test_current_snapshot_requires_initialization() -> None:
+    """current_snapshot() raises until bootstrap has published a snapshot."""
+    collector = MlflowObservabilityCollector(_empty_client())
 
-    with patch.object(collector, "_start_background_rebuild") as mock_rebuild:
-        collector.collect()
-
-    mock_rebuild.assert_called_once()
+    with pytest.raises(RuntimeError, match="not initialized"):
+        collector.current_snapshot()
 
 
-def test_collect_skips_rebuild_when_already_in_progress(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """collect() does not spawn a duplicate rebuild when one is running."""
-    collector = MlflowObservabilityCollector(
-        _empty_client(), cache_ttl_seconds=1
-    )
-    collector.collect()
-    _advance_monotonic(monkeypatch, seconds=10)
-    collector._rebuild_in_progress = True
+def test_initialize_publishes_first_snapshot() -> None:
+    """initialize() builds and publishes the first baseline."""
+    collector = MlflowObservabilityCollector(_empty_client())
 
-    with patch.object(collector, "_start_background_rebuild") as mock_rebuild:
-        collector.collect()
+    snapshot = collector.initialize()
 
-    mock_rebuild.assert_not_called()
-    collector._rebuild_in_progress = False  # avoid leaking state
+    assert collector.current_snapshot() == snapshot
 
 
-# ---------------------------------------------------------------------------
-# _is_stale
-# ---------------------------------------------------------------------------
-
-
-def test_is_stale_returns_false_for_fresh_baseline() -> None:
-    """A baseline built just now is not considered stale."""
-    collector = MlflowObservabilityCollector(
-        _empty_client(), cache_ttl_seconds=3600
-    )
-    collector.collect()
-
-    assert not collector._is_stale()
-
-
-def test_is_stale_returns_true_after_ttl_elapsed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A baseline whose age exceeds cache_ttl_seconds is stale."""
-    collector = MlflowObservabilityCollector(
-        _empty_client(), cache_ttl_seconds=60
-    )
-    collector.collect()
-    _advance_monotonic(monkeypatch, seconds=120)
-
-    assert collector._is_stale()
-
-
-# ---------------------------------------------------------------------------
-# _rebuild_and_swap
-# ---------------------------------------------------------------------------
-
-
-def test_rebuild_and_swap_clears_flag_on_exception() -> None:
-    """_rebuild_and_swap() resets the in-progress flag after an exception."""
-    collector = MlflowObservabilityCollector(
-        _empty_client(), cache_ttl_seconds=3600
-    )
-    collector._rebuild_in_progress = True
+def test_refresh_delta_snapshot_rebuilds_from_latest_baseline() -> None:
+    """Delta refreshes always use the currently published baseline."""
+    collector = MlflowObservabilityCollector(_empty_client())
+    baseline = _make_baseline()
+    initial_snapshot = _make_snapshot(total=1)
+    collector._publish_state(baseline, initial_snapshot)
+    refreshed_snapshot = _make_snapshot(total=9)
 
     with patch.object(
         collector,
-        "_build_baseline",
-        side_effect=RuntimeError("build failed"),
+        "_build_snapshot_from_baseline",
+        return_value=refreshed_snapshot,
+    ) as mock_build:
+        snapshot = collector.refresh_delta_snapshot()
+
+    mock_build.assert_called_once_with(baseline)
+    assert snapshot == refreshed_snapshot
+    assert collector.current_snapshot() == refreshed_snapshot
+
+
+def test_refresh_delta_snapshot_returns_stale_snapshot_when_locked() -> None:
+    """Delta refresh returns the last published snapshot during contention."""
+    collector = MlflowObservabilityCollector(_empty_client())
+    published_snapshot = _make_snapshot(total=4)
+    collector._publish_state(_make_baseline(), published_snapshot)
+    collector._refresh_lock.acquire()
+
+    try:
+        with patch.object(
+            collector, "_build_snapshot_from_baseline"
+        ) as mock_build:
+            snapshot = collector.refresh_delta_snapshot()
+    finally:
+        collector._refresh_lock.release()
+
+    mock_build.assert_not_called()
+    assert snapshot == published_snapshot
+
+
+def test_baseline_cycle_replaces_published_state() -> None:
+    """A successful baseline cycle publishes a new baseline and snapshot."""
+    collector = MlflowObservabilityCollector(_empty_client())
+    collector._publish_state(_make_baseline(), _make_snapshot(total=1))
+    new_baseline = _make_baseline(horizon_ms=900_000)
+    new_snapshot = _make_snapshot(total=5)
+
+    with (
+        patch.object(collector, "_build_baseline", return_value=new_baseline),
+        patch.object(
+            collector,
+            "_build_snapshot_from_baseline",
+            return_value=new_snapshot,
+        ),
     ):
-        collector._rebuild_and_swap()
+        snapshot = collector._run_baseline_cycle(blocking=True)
 
-    assert not collector._rebuild_in_progress
-
-
-def test_rebuild_and_swap_replaces_baseline_on_success() -> None:
-    """_rebuild_and_swap() publishes a new baseline and clears the flag."""
-    collector = MlflowObservabilityCollector(
-        _empty_client(), cache_ttl_seconds=3600
-    )
-    collector.collect()
-    initial_baseline = collector._baseline
-    collector._rebuild_in_progress = True
-
-    collector._rebuild_and_swap()
-
-    assert not collector._rebuild_in_progress
-    assert collector._baseline is not initial_baseline
+    assert snapshot == new_snapshot
+    assert collector.current_snapshot() == new_snapshot
+    published_state = collector._get_published_state()
+    assert published_state is not None
+    assert published_state.baseline == new_baseline
 
 
-# ---------------------------------------------------------------------------
-# _scan_runs
-# ---------------------------------------------------------------------------
+def test_baseline_cycle_returns_none_when_delta_refresh_is_running() -> None:
+    """Periodic baselines skip a cycle instead of overlapping MLflow I/O."""
+    collector = MlflowObservabilityCollector(_empty_client())
+    collector._publish_state(_make_baseline(), _make_snapshot(total=1))
+    collector._refresh_lock.acquire()
+
+    try:
+        snapshot = collector._run_baseline_cycle(blocking=False)
+    finally:
+        collector._refresh_lock.release()
+
+    assert snapshot is None
+    assert collector.current_snapshot() == _make_snapshot(total=1)
+
+
+def test_start_baseline_worker_is_idempotent() -> None:
+    """The baseline worker can only be started once."""
+    collector = MlflowObservabilityCollector(_empty_client())
+
+    with patch("mlflow_exporter.collector.threading.Thread") as mock_thread:
+        collector.start_baseline_worker()
+        collector.start_baseline_worker()
+
+    mock_thread.assert_called_once()
+
+
+def test_run_baseline_loop_rebuilds_periodically() -> None:
+    """The background loop rebuilds until a stop request is observed."""
+    collector = MlflowObservabilityCollector(_empty_client())
+
+    with (
+        patch.object(
+            collector,
+            "_wait_for_next_baseline_cycle",
+            side_effect=[False, True],
+        ),
+        patch.object(collector, "_run_baseline_cycle") as mock_cycle,
+    ):
+        collector._run_baseline_loop(
+            on_snapshot=MagicMock(),
+            on_failure=MagicMock(),
+        )
+
+    mock_cycle.assert_called_once_with(blocking=False)
+
+
+def test_run_baseline_loop_keeps_previous_snapshot_on_failure() -> None:
+    """A failed background baseline leaves the published snapshot intact."""
+    collector = MlflowObservabilityCollector(_empty_client())
+    published_snapshot = _make_snapshot(total=2)
+    collector._publish_state(_make_baseline(), published_snapshot)
+
+    with (
+        patch.object(
+            collector,
+            "_wait_for_next_baseline_cycle",
+            side_effect=[False, True],
+        ),
+        patch.object(
+            collector,
+            "_run_baseline_cycle",
+            side_effect=RuntimeError("boom"),
+        ),
+    ):
+        collector._run_baseline_loop(
+            on_snapshot=MagicMock(),
+            on_failure=MagicMock(),
+        )
+
+    assert collector.current_snapshot() == published_snapshot
+
+
+def test_run_baseline_loop_reports_success_through_callback() -> None:
+    """Successful baseline refreshes are reported through the callback."""
+    collector = MlflowObservabilityCollector(_empty_client())
+    snapshot = _make_snapshot(total=7)
+    on_snapshot = MagicMock()
+    on_failure = MagicMock()
+
+    with (
+        patch.object(
+            collector,
+            "_wait_for_next_baseline_cycle",
+            side_effect=[False, True],
+        ),
+        patch.object(
+            collector,
+            "_run_baseline_cycle",
+            return_value=snapshot,
+        ),
+    ):
+        collector._run_baseline_loop(on_snapshot, on_failure)
+
+    on_snapshot.assert_called_once()
+    on_failure.assert_not_called()
+
+
+def test_run_baseline_loop_reports_failure_through_callback() -> None:
+    """Failed baseline refreshes are reported through the failure callback."""
+    collector = MlflowObservabilityCollector(_empty_client())
+    on_snapshot = MagicMock()
+    on_failure = MagicMock()
+
+    with (
+        patch.object(
+            collector,
+            "_wait_for_next_baseline_cycle",
+            side_effect=[False, True],
+        ),
+        patch.object(
+            collector,
+            "_run_baseline_cycle",
+            side_effect=RuntimeError("boom"),
+        ),
+    ):
+        collector._run_baseline_loop(on_snapshot, on_failure)
+
+    on_snapshot.assert_not_called()
+    on_failure.assert_called_once()
+
+
+def test_run_delta_refresh_loop_publishes_snapshots_through_callback() -> None:
+    """The delta loop reports refreshed snapshots through the success callback."""
+    collector = MlflowObservabilityCollector(_empty_client())
+    published_snapshot = _make_snapshot(total=3)
+    on_snapshot = MagicMock()
+    on_failure = MagicMock()
+
+    with (
+        patch.object(
+            collector,
+            "_wait_for_next_delta_cycle",
+            side_effect=[False, True],
+        ),
+        patch.object(
+            collector,
+            "refresh_delta_snapshot",
+            return_value=published_snapshot,
+        ),
+    ):
+        collector.run_delta_refresh_loop(30, on_snapshot, on_failure)
+
+    on_snapshot.assert_called_once()
+    on_failure.assert_not_called()
+
+
+def test_run_delta_refresh_loop_reports_failures_through_callback() -> None:
+    """The delta loop reports refresh failures without crashing the state."""
+    collector = MlflowObservabilityCollector(_empty_client())
+    on_snapshot = MagicMock()
+    on_failure = MagicMock()
+
+    with (
+        patch.object(
+            collector,
+            "_wait_for_next_delta_cycle",
+            side_effect=[False, True],
+        ),
+        patch.object(
+            collector,
+            "refresh_delta_snapshot",
+            side_effect=RuntimeError("boom"),
+        ),
+    ):
+        collector.run_delta_refresh_loop(30, on_snapshot, on_failure)
+
+    on_snapshot.assert_not_called()
+    on_failure.assert_called_once()
 
 
 def test_scan_runs_returns_zeroes_for_empty_experiment_list() -> None:
     """_scan_runs() with no experiment IDs returns zero for all statuses."""
     client = _empty_client()
-    collector = MlflowObservabilityCollector(client, cache_ttl_seconds=3600)
+    collector = MlflowObservabilityCollector(client)
 
     result = collector._scan_runs([], filter_string="")
 
-    assert result == {s: 0 for s in RUN_STATUSES}
+    assert result == {status: 0 for status in RUN_STATUSES}
     client.search_runs.assert_not_called()
 
 
@@ -227,7 +365,7 @@ def test_scan_runs_counts_runs_by_status() -> None:
             _make_run("FAILED"),
         ]
     )
-    collector = MlflowObservabilityCollector(client, cache_ttl_seconds=3600)
+    collector = MlflowObservabilityCollector(client)
 
     result = collector._scan_runs(["exp1"], filter_string="")
 
@@ -241,16 +379,11 @@ def test_scan_runs_ignores_unknown_status() -> None:
     """_scan_runs() silently ignores unrecognised run statuses."""
     client = MagicMock()
     client.search_runs.return_value = FakePage([_make_run("UNKNOWN")])
-    collector = MlflowObservabilityCollector(client, cache_ttl_seconds=3600)
+    collector = MlflowObservabilityCollector(client)
 
     result = collector._scan_runs(["exp1"], filter_string="")
 
-    assert all(v == 0 for v in result.values())
-
-
-# ---------------------------------------------------------------------------
-# _scan_old_experiments
-# ---------------------------------------------------------------------------
+    assert all(value == 0 for value in result.values())
 
 
 def test_scan_old_experiments_classifies_by_horizon() -> None:
@@ -260,7 +393,7 @@ def test_scan_old_experiments_classifies_by_horizon() -> None:
     new_exp = _make_experiment("exp-new", last_update_time=horizon_ms + 1)
     client = MagicMock()
     client.search_experiments.return_value = FakePage([old_exp, new_exp])
-    collector = MlflowObservabilityCollector(client, cache_ttl_seconds=3600)
+    collector = MlflowObservabilityCollector(client)
 
     old_ids, old_by_stage = collector._scan_old_experiments(horizon_ms)
 
@@ -278,17 +411,12 @@ def test_scan_old_experiments_counts_deleted_stage() -> None:
     )
     client = MagicMock()
     client.search_experiments.return_value = FakePage([deleted_exp])
-    collector = MlflowObservabilityCollector(client, cache_ttl_seconds=3600)
+    collector = MlflowObservabilityCollector(client)
 
     old_ids, old_by_stage = collector._scan_old_experiments(horizon_ms)
 
     assert old_ids == ["exp-del"]
     assert old_by_stage.get("deleted") == 1
-
-
-# ---------------------------------------------------------------------------
-# _scan_fresh_experiments
-# ---------------------------------------------------------------------------
 
 
 def test_scan_fresh_experiments_applies_horizon_filter_to_api() -> None:
@@ -297,18 +425,13 @@ def test_scan_fresh_experiments_applies_horizon_filter_to_api() -> None:
     fresh_exp = _make_experiment("exp-fresh", last_update_time=horizon_ms + 1)
     client = MagicMock()
     client.search_experiments.return_value = FakePage([fresh_exp])
-    collector = MlflowObservabilityCollector(client, cache_ttl_seconds=3600)
+    collector = MlflowObservabilityCollector(client)
 
     ids, _ = collector._scan_fresh_experiments(horizon_ms)
 
     called_kwargs = client.search_experiments.call_args.kwargs
     assert str(horizon_ms) in called_kwargs.get("filter_string", "")
     assert ids == ["exp-fresh"]
-
-
-# ---------------------------------------------------------------------------
-# _scan_model_versions
-# ---------------------------------------------------------------------------
 
 
 def test_scan_model_versions_counts_by_stage() -> None:
@@ -322,7 +445,7 @@ def test_scan_model_versions_counts_by_stage() -> None:
             _make_model_version("None"),
         ]
     )
-    collector = MlflowObservabilityCollector(client, cache_ttl_seconds=3600)
+    collector = MlflowObservabilityCollector(client)
 
     total, by_stage = collector._scan_model_versions()
 
@@ -330,11 +453,6 @@ def test_scan_model_versions_counts_by_stage() -> None:
     assert by_stage["Production"] == 2
     assert by_stage["Staging"] == 1
     assert by_stage["None"] == 1
-
-
-# ---------------------------------------------------------------------------
-# _count_paginated
-# ---------------------------------------------------------------------------
 
 
 def test_count_paginated_accumulates_across_multiple_pages() -> None:
@@ -364,13 +482,8 @@ def test_count_paginated_handles_single_page() -> None:
     assert search_fn.call_count == 1
 
 
-# ---------------------------------------------------------------------------
-# _compute_snapshot
-# ---------------------------------------------------------------------------
-
-
-def test_compute_snapshot_merges_baseline_and_delta() -> None:
-    """Snapshot totals are the sum of stable baseline and fresh delta."""
+def test_build_snapshot_from_baseline_merges_baseline_and_delta() -> None:
+    """Merged snapshots combine the current baseline with fresh deltas."""
     client = MagicMock()
     fresh_exp = _make_experiment(
         "exp-new", last_update_time=10**15, lifecycle_stage="active"
@@ -379,36 +492,13 @@ def test_compute_snapshot_merges_baseline_and_delta() -> None:
     client.search_runs.return_value = FakePage(
         [_make_run("RUNNING"), _make_run("RUNNING")]
     )
-    collector = MlflowObservabilityCollector(client, cache_ttl_seconds=3600)
-    # Inject a pre-built baseline to isolate _compute_snapshot.
-    collector._baseline = _Baseline(
-        old_experiment_ids=["exp-old"],
-        old_experiments_by_stage={"active": 3, "deleted": 1},
-        old_runs_by_status={
-            "RUNNING": 1,
-            "FINISHED": 5,
-            "FAILED": 0,
-            "KILLED": 0,
-        },
-        registered_models_total=2,
-        model_versions_total=7,
-        model_versions_by_stage={
-            "Production": 3,
-            "Staging": 2,
-            "None": 2,
-            "Archived": 0,
-        },
-        horizon_ms=500_000,
-        built_at=time.monotonic(),
-    )
+    collector = MlflowObservabilityCollector(client)
 
-    snapshot = collector._compute_snapshot()
+    snapshot = collector._build_snapshot_from_baseline(_make_baseline())
 
-    # 4 old experiments (3 active + 1 deleted) + 1 fresh active
     assert snapshot.experiments_total == 5
     assert snapshot.experiments_active_total == 4
     assert snapshot.experiments_deleted_total == 1
-    # 1 old RUNNING + 2 fresh RUNNING
     assert snapshot.runs_by_status["RUNNING"] == 3
     assert snapshot.runs_by_status["FINISHED"] == 5
     assert snapshot.registered_models_total == 2

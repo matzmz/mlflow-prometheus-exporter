@@ -71,7 +71,7 @@ def exporter_server(tmp_path):
         [
             sys.executable,
             "-m",
-            "mlflow_exporter.mlflow_exporter",
+            "mlflow_exporter.main",
             "--mlflowurl",
             tracking_url,
             "-t",
@@ -94,7 +94,7 @@ def exporter_server(tmp_path):
 
 @retry(stop=stop_after_delay(TEST_EXPORTER_TIMEOUT), wait=wait_fixed(1))
 def verify_metrics(exporter_port):
-    """Try to get metrices every 1 second."""
+    """Try to get metrics every 1 second."""
     response = requests.get(f"http://127.0.0.1:{exporter_port}/metrics")
     response.raise_for_status()  # Raise exception if the request was not successful
     metrics_text = response.text
