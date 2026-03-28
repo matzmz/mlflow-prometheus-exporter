@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mlflow_exporter.metrics import PrometheusMetrics
-from mlflow_exporter.settings import MODEL_STAGES, RUN_STATUSES
+from mlflow_exporter.config.settings import MODEL_STAGES, RUN_STATUSES
+from mlflow_exporter.infra.metrics import PrometheusMetrics
 from tests.helpers import make_snapshot
 
 
@@ -20,10 +20,12 @@ def _new_mock(*args: Any, **kwargs: Any) -> MagicMock:
 def metrics() -> Generator[PrometheusMetrics, None, None]:
     """Yield a PrometheusMetrics with prometheus_client classes replaced."""
     with (
-        patch("mlflow_exporter.metrics.Gauge", side_effect=_new_mock),
-        patch("mlflow_exporter.metrics.Histogram", side_effect=_new_mock),
-        patch("mlflow_exporter.metrics.Counter", side_effect=_new_mock),
-        patch("mlflow_exporter.metrics.Info", side_effect=_new_mock),
+        patch("mlflow_exporter.infra.metrics.Gauge", side_effect=_new_mock),
+        patch(
+            "mlflow_exporter.infra.metrics.Histogram", side_effect=_new_mock
+        ),
+        patch("mlflow_exporter.infra.metrics.Counter", side_effect=_new_mock),
+        patch("mlflow_exporter.infra.metrics.Info", side_effect=_new_mock),
     ):
         yield PrometheusMetrics()
 

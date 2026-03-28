@@ -4,7 +4,7 @@ import time
 from collections.abc import Mapping
 from typing import Optional
 
-from mlflow_exporter.collector_state import (
+from mlflow_exporter.collector.state import (
     _Baseline,
     _ExperimentBaseline,
     _ExperimentRef,
@@ -12,8 +12,8 @@ from mlflow_exporter.collector_state import (
     _ModelVersionScanResult,
     _RunCountsByExperimentScanResult,
 )
+from mlflow_exporter.config.settings import RUN_STATUSES
 from mlflow_exporter.models import MlflowSnapshot
-from mlflow_exporter.settings import RUN_STATUSES
 
 
 class CollectorAssembler:

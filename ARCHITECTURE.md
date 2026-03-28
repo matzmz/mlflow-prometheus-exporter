@@ -5,16 +5,20 @@ Exporter.
 
 ## Overview
 
-The exporter is structured around eight responsibilities:
+The exporter is structured around three sub-packages and two top-level modules:
 
 - `main.py`: composition root and process entrypoint
 - `runtime.py`: application lifecycle and operational coordination
-- `collector.py`: refresh runtime, locks, and snapshot publication
-- `collector_assembler.py`: helper that normalises, merges, and assembles collector state
-- `collector_queries.py`: MLflow query adapter and pagination details
-- `collector_state.py`: collector state dataclasses
-- `metrics.py`: Prometheus publication and health metrics
-- `server.py`: HTTP server with health probes and metrics endpoint
+- `models.py`: domain value objects shared across components
+- `config/settings.py`: runtime constants and typed configuration
+- `config/cli.py`: CLI argument parsing and MLflow client setup
+- `config/log.py`: logging configuration
+- `collector/coordinator.py`: refresh runtime, locks, and snapshot publication
+- `collector/assembler.py`: helper that normalises, merges, and assembles collector state
+- `collector/queries.py`: MLflow query adapter and pagination details
+- `collector/state.py`: collector state dataclasses
+- `infra/metrics.py`: Prometheus publication and health metrics
+- `infra/server.py`: HTTP server with health probes and metrics endpoint
 
 The core design goal is to reduce load on MLflow while keeping the exporter
 simple and operationally safe:
@@ -58,7 +62,30 @@ It is responsible for:
 It is the boundary between domain behavior (`collector`) and infrastructure
 concerns (`prometheus_client`, `ExporterServer`, process lifecycle).
 
-### `mlflow_exporter/collector.py`
+### `mlflow_exporter/config/settings.py`
+
+This module defines runtime constants and typed configuration.
+
+### `mlflow_exporter/config/cli.py`
+
+This module handles CLI argument parsing and MLflow client setup.
+
+It is responsible for:
+
+- parsing runtime settings
+- resolving environment variables
+- building and configuring the MLflow client
+
+### `mlflow_exporter/config/log.py`
+
+This module configures logging.
+
+It is responsible for:
+
+- setting up the root logger with the requested level and format
+- providing text and JSON output formatters
+
+### `mlflow_exporter/collector/coordinator.py`
 
 This is the refresh coordinator.
 
@@ -84,7 +111,7 @@ Important internal concepts:
 - `_state_lock`: protects publication/retrieval of the current state
 - `_stop_event`: coordinated stop signal for long-running loops
 
-### `mlflow_exporter/collector_queries.py`
+### `mlflow_exporter/collector/queries.py`
 
 This is the MLflow query adapter.
 
@@ -95,7 +122,7 @@ It is responsible for:
 - returning small immutable scan results instead of raw MLflow entities
 - keeping API-specific details out of the runtime control flow
 
-### `mlflow_exporter/collector_assembler.py`
+### `mlflow_exporter/collector/assembler.py`
 
 This module contains the collector helper.
 
@@ -107,7 +134,7 @@ It is responsible for:
 - merging dirty experiment metadata onto the last baseline
 - building the exported snapshot from `stable baseline + volatile runs`
 
-### `mlflow_exporter/collector_state.py`
+### `mlflow_exporter/collector/state.py`
 
 This module defines collector state dataclasses.
 
@@ -116,7 +143,7 @@ It is responsible for:
 - describing the published baseline/snapshot state objects
 - providing data-only shapes shared across collector modules
 
-### `mlflow_exporter/metrics.py`
+### `mlflow_exporter/infra/metrics.py`
 
 This module is a Prometheus adapter.
 
@@ -128,7 +155,7 @@ It is responsible for:
 
 It does not know how snapshots are computed.
 
-### `mlflow_exporter/server.py`
+### `mlflow_exporter/infra/server.py`
 
 This module is the HTTP server.
 

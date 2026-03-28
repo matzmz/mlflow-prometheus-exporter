@@ -3,7 +3,7 @@
 import json
 import logging
 
-from mlflow_exporter.log import configure_logging
+from mlflow_exporter.config.log import configure_logging
 
 
 def test_configure_logging_text_format(caplog: object) -> None:

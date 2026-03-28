@@ -5,12 +5,15 @@ from unittest.mock import patch
 
 import pytest
 
-from mlflow_exporter.config import (
+from mlflow_exporter.config.cli import (
     configure_mlflow_client,
     parse_args,
     resolve_tracking_uri,
 )
-from mlflow_exporter.settings import DEFAULT_TRACKING_URI, ExporterSettings
+from mlflow_exporter.config.settings import (
+    DEFAULT_TRACKING_URI,
+    ExporterSettings,
+)
 
 
 def test_parse_args_prefers_tracking_uri_environment(monkeypatch):
@@ -62,7 +65,7 @@ def test_configure_mlflow_client_applies_credentials(monkeypatch):
     )
 
     with patch(
-        "mlflow_exporter.config.mlflow.set_tracking_uri"
+        "mlflow_exporter.config.cli.mlflow.set_tracking_uri"
     ) as mock_set_uri:
         client = configure_mlflow_client(settings)
 
@@ -143,7 +146,7 @@ def test_configure_mlflow_client_without_credentials(monkeypatch) -> None:
         log_format="text",
     )
 
-    with patch("mlflow_exporter.config.mlflow.set_tracking_uri"):
+    with patch("mlflow_exporter.config.cli.mlflow.set_tracking_uri"):
         configure_mlflow_client(settings)
 
     assert "MLFLOW_TRACKING_USERNAME" not in os.environ

@@ -9,7 +9,7 @@ from collections.abc import Generator
 import pytest
 from prometheus_client import CollectorRegistry
 
-from mlflow_exporter.server import ExporterServer
+from mlflow_exporter.infra.server import ExporterServer
 
 
 def _get(port: int, path: str) -> tuple[int, bytes]:

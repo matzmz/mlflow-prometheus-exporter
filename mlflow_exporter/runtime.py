@@ -3,11 +3,13 @@
 import logging
 import time
 
-from mlflow_exporter.collector import MlflowObservabilityCollector
-from mlflow_exporter.metrics import PrometheusMetrics
+from mlflow_exporter.collector.coordinator import (
+    MlflowObservabilityCollector,
+)
+from mlflow_exporter.config.settings import ExporterSettings
+from mlflow_exporter.infra.metrics import PrometheusMetrics
+from mlflow_exporter.infra.server import ExporterServer
 from mlflow_exporter.models import MlflowSnapshot
-from mlflow_exporter.server import ExporterServer
-from mlflow_exporter.settings import ExporterSettings
 
 LOGGER = logging.getLogger(__name__)
 

@@ -7,13 +7,15 @@ import logging
 import signal
 from typing import Optional, Sequence
 
-from mlflow_exporter.collector import MlflowObservabilityCollector
-from mlflow_exporter.config import configure_mlflow_client, parse_args
-from mlflow_exporter.log import configure_logging
-from mlflow_exporter.metrics import PrometheusMetrics
+from mlflow_exporter.collector.coordinator import (
+    MlflowObservabilityCollector,
+)
+from mlflow_exporter.config.cli import configure_mlflow_client, parse_args
+from mlflow_exporter.config.log import configure_logging
+from mlflow_exporter.config.settings import ExporterSettings
+from mlflow_exporter.infra.metrics import PrometheusMetrics
+from mlflow_exporter.infra.server import ExporterServer
 from mlflow_exporter.runtime import ExporterRuntime
-from mlflow_exporter.server import ExporterServer
-from mlflow_exporter.settings import ExporterSettings
 
 LOGGER = logging.getLogger(__name__)
 

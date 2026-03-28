@@ -13,19 +13,17 @@ from typing import Optional
 
 from mlflow.tracking import MlflowClient
 
-from mlflow_exporter.collector_assembler import CollectorAssembler
-from mlflow_exporter.collector_queries import MlflowCollectorQueries
-from mlflow_exporter.collector_state import (
+from mlflow_exporter.collector.assembler import CollectorAssembler
+from mlflow_exporter.collector.queries import MlflowCollectorQueries
+from mlflow_exporter.collector.state import (
     _Baseline,
-    _ExperimentBaseline,
-    _ExperimentRef,
-    _ExperimentScanResult,
-    _ModelVersionScanResult,
     _PublishedState,
-    _RunCountsByExperimentScanResult,
+)
+from mlflow_exporter.config.settings import (
+    BASELINE_INTERVAL_SECONDS,
+    HORIZON_DAYS,
 )
 from mlflow_exporter.models import MlflowSnapshot
-from mlflow_exporter.settings import BASELINE_INTERVAL_SECONDS, HORIZON_DAYS
 
 LOGGER = logging.getLogger(__name__)
 MAX_BACKOFF_SECONDS = 120
@@ -33,12 +31,6 @@ __all__ = [
     "MAX_BACKOFF_SECONDS",
     "MlflowObservabilityCollector",
     "_backoff_interval",
-    "_Baseline",
-    "_ExperimentBaseline",
-    "_ExperimentRef",
-    "_ExperimentScanResult",
-    "_ModelVersionScanResult",
-    "_RunCountsByExperimentScanResult",
 ]
 
 

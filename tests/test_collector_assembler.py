@@ -2,8 +2,8 @@
 
 from collections.abc import Mapping
 
-from mlflow_exporter.collector_assembler import CollectorAssembler
-from mlflow_exporter.collector_state import (
+from mlflow_exporter.collector.assembler import CollectorAssembler
+from mlflow_exporter.collector.state import (
     _Baseline,
     _ExperimentBaseline,
     _ExperimentRef,

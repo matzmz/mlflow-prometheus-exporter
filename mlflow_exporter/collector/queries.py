@@ -12,14 +12,14 @@ from typing import Any, Optional
 from mlflow.entities import ViewType
 from mlflow.tracking import MlflowClient
 
-from mlflow_exporter.collector_assembler import CollectorAssembler
-from mlflow_exporter.collector_state import (
+from mlflow_exporter.collector.assembler import CollectorAssembler
+from mlflow_exporter.collector.state import (
     _ExperimentRef,
     _ExperimentScanResult,
     _ModelVersionScanResult,
     _RunCountsByExperimentScanResult,
 )
-from mlflow_exporter.settings import (
+from mlflow_exporter.config.settings import (
     EXPERIMENT_PAGE_SIZE,
     MODEL_PAGE_SIZE,
     MODEL_STAGES,

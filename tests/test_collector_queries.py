@@ -5,8 +5,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mlflow_exporter.collector_queries import MlflowCollectorQueries
-from mlflow_exporter.collector_state import (
+from mlflow_exporter.collector.queries import MlflowCollectorQueries
+from mlflow_exporter.collector.state import (
     _ExperimentRef,
     _RunCountsByExperimentScanResult,
 )

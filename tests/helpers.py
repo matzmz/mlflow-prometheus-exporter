@@ -2,12 +2,12 @@
 
 from types import SimpleNamespace
 
-from mlflow_exporter.models import MlflowSnapshot
-from mlflow_exporter.settings import (
+from mlflow_exporter.config.settings import (
     MODEL_STAGES,
     RUN_STATUSES,
     ExporterSettings,
 )
+from mlflow_exporter.models import MlflowSnapshot
 
 
 class FakePage(list):

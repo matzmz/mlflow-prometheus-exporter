@@ -7,7 +7,7 @@ from typing import Optional, Sequence
 import mlflow
 from mlflow.tracking import MlflowClient
 
-from mlflow_exporter.settings import (
+from mlflow_exporter.config.settings import (
     DEFAULT_BASELINE_INTERVAL_SECONDS,
     DEFAULT_EXPORTER_PORT,
     DEFAULT_LISTEN_ADDRESS,

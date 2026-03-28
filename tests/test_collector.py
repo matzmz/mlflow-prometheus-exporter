@@ -18,8 +18,8 @@ from mlflow_exporter.collector import (
     _ModelVersionScanResult,
     _RunCountsByExperimentScanResult,
 )
+from mlflow_exporter.config.settings import RUN_STATUSES
 from mlflow_exporter.models import MlflowSnapshot
-from mlflow_exporter.settings import RUN_STATUSES
 from tests.helpers import FakePage
 
 
@@ -189,7 +189,9 @@ def test_start_baseline_worker_is_idempotent() -> None:
     """The baseline worker can only be started once."""
     collector = MlflowObservabilityCollector(_empty_client())
 
-    with patch("mlflow_exporter.collector.threading.Thread") as mock_thread:
+    with patch(
+        "mlflow_exporter.collector.coordinator.threading.Thread"
+    ) as mock_thread:
         collector.start_baseline_worker()
         collector.start_baseline_worker()
 
