@@ -1,11 +1,22 @@
 """Shared test factory functions for the mlflow_exporter test suite."""
 
+from types import SimpleNamespace
+
 from mlflow_exporter.models import MlflowSnapshot
 from mlflow_exporter.settings import (
     MODEL_STAGES,
     RUN_STATUSES,
     ExporterSettings,
 )
+
+
+class FakePage(list):
+    """List with an optional pagination token, mimicking MLflow PagedList."""
+
+    def __init__(self, items: list, token: str | None = None) -> None:
+        """Initialise with items and an optional next-page token."""
+        super().__init__(items)
+        self.token = token
 
 
 def make_settings(**overrides: object) -> ExporterSettings:
@@ -46,3 +57,31 @@ def make_snapshot(
         model_versions_total=model_versions_total,
         model_versions_by_stage={s: 0 for s in MODEL_STAGES},
     )
+
+
+def make_experiment(
+    experiment_id: str,
+    last_update_time: int,
+    lifecycle_stage: str = "active",
+) -> SimpleNamespace:
+    """Return a minimal stand-in for an MLflow Experiment object."""
+    return SimpleNamespace(
+        experiment_id=experiment_id,
+        last_update_time=last_update_time,
+        lifecycle_stage=lifecycle_stage,
+    )
+
+
+def make_run(
+    status: str,
+    experiment_id: str = "exp1",
+) -> SimpleNamespace:
+    """Return a minimal stand-in for an MLflow Run object."""
+    return SimpleNamespace(
+        info=SimpleNamespace(status=status, experiment_id=experiment_id)
+    )
+
+
+def make_model_version(stage: str) -> SimpleNamespace:
+    """Return a minimal stand-in for an MLflow ModelVersion object."""
+    return SimpleNamespace(current_stage=stage)

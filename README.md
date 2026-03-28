@@ -46,8 +46,8 @@ A lightweight Prometheus exporter that scrapes an [MLflow](https://mlflow.org/) 
 
 The exporter uses a **baseline + delta** caching strategy to keep polling overhead negligible even against large MLflow deployments:
 
-- **Baseline** — a full scan of all data older than `HORIZON_DAYS` (default: 7 days). Built once during startup and then rebuilt every `BASELINE_INTERVAL_SECONDS` (default: 1 h) in a background thread.
-- **Delta** — a lightweight re-scan of only data newer than the latest baseline horizon, executed on every poll cycle (default: every 30 s).
+- **Baseline** — a full scan of all experiments plus the **stable** run slice: terminal runs whose `end_time` is older than `HORIZON_DAYS` (default: 7 days). Built once during startup and then rebuilt every `BASELINE_INTERVAL_SECONDS` (default: 1 h) in a background thread.
+- **Delta** — a lightweight rebuild of only the **volatile** run slice: all `RUNNING` runs plus terminal runs whose `end_time` is newer than the latest baseline horizon. Experiment metadata is refreshed separately using experiment `last_update_time`. Executed on every poll cycle (default: every 30 s).
 
 The exporter starts an HTTP server immediately, exposing `/healthz` from the start and `/readyz` only after the initial baseline has completed. `/metrics` is always available but returns meaningful data only after bootstrap. If a baseline rebuild and delta refresh overlap, the exporter serves the last published snapshot instead of blocking scrapes.
 
@@ -59,7 +59,7 @@ The exporter starts an HTTP server immediately, exposing `/healthz` from the sta
 | `/readyz` | Readiness probe — returns `200` after bootstrap, `503` before |
 | `/metrics` | Prometheus metrics endpoint |
 
-Model-registry data (registered models and model versions) has no timestamp filter in the MLflow API and is therefore taken entirely from the baseline.
+Model-registry data (registered models and model versions) has no timestamp filter in the MLflow API and is therefore taken entirely from the baseline. The periodic baseline rebuild also acts as a repair pass for rare historical run changes that fall outside the volatile run window.
 
 
 ## Configuration
@@ -159,13 +159,18 @@ mlflow_exporter/
 ├── main.py                # composition root and process entrypoint
 ├── settings.py            # constants and typed dataclasses
 ├── config.py              # CLI parsing, env resolution, MlflowClient setup
-├── collector.py           # MLflow data collection with baseline+delta cache
+├── collector.py           # refresh runtime: locks, loops, publication
+├── collector_assembler.py # helper: normalization, merges, baseline/snapshot assembly
+├── collector_queries.py   # MLflow pagination, filters, and query adapter
+├── collector_state.py     # collector state dataclasses
 ├── metrics.py             # Prometheus metric definitions and update logic
 ├── runtime.py             # runtime service coordinating collector + metrics
 └── server.py              # HTTP server with /healthz, /readyz, /metrics
 tests/
 ├── helpers.py             # shared test factories
+├── test_collector_assembler.py
 ├── test_collector.py
+├── test_collector_queries.py
 ├── test_exporter_config.py
 ├── test_metrics.py
 ├── test_orchestrator.py

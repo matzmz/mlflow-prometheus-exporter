@@ -5,11 +5,14 @@ Exporter.
 
 ## Overview
 
-The exporter is structured around five responsibilities:
+The exporter is structured around eight responsibilities:
 
 - `main.py`: composition root and process entrypoint
 - `runtime.py`: application lifecycle and operational coordination
-- `collector.py`: MLflow data acquisition, caching, and concurrency control
+- `collector.py`: refresh runtime, locks, and snapshot publication
+- `collector_assembler.py`: helper that normalises, merges, and assembles collector state
+- `collector_queries.py`: MLflow query adapter and pagination details
+- `collector_state.py`: collector state dataclasses
 - `metrics.py`: Prometheus publication and health metrics
 - `server.py`: HTTP server with health probes and metrics endpoint
 
@@ -18,7 +21,7 @@ simple and operationally safe:
 
 - a blocking startup builds an initial `baseline`
 - a background baseline worker periodically refreshes stable state
-- a frequent delta loop refreshes recent state
+- a frequent delta loop refreshes only the volatile state
 - a shared lock prevents unmanaged concurrent refreshes
 - stale data is acceptable during contention; partial data is not
 
@@ -57,27 +60,61 @@ concerns (`prometheus_client`, `ExporterServer`, process lifecycle).
 
 ### `mlflow_exporter/collector.py`
 
-This is the domain core of the exporter.
+This is the refresh coordinator.
 
 It is responsible for:
 
-- building a complete `baseline`
-- building a `snapshot` from `baseline + delta`
 - storing the last published immutable state
 - ensuring only one refresh talks to MLflow at a time
 - returning stale snapshots during lock contention
 - running the baseline worker loop
 - running the delta loop
+- orchestrating calls to the query adapter and snapshot assembler
 
 Important internal concepts:
 
-- `_Baseline`: immutable stable state older than the horizon
-- `_ExperimentScanResult`: result of scanning experiments (IDs + counts by stage)
+- `_queries`: the `MlflowCollectorQueries` collaborator used for MLflow I/O
+- `_Baseline`: immutable experiment metadata plus stable run counts
+- `_ExperimentBaseline`: one experiment plus only its stable run counts
+- `_ExperimentScanResult`: result of scanning experiments
 - `_ModelVersionScanResult`: result of scanning model versions (total + counts by stage)
+- `_RunCountsByExperimentScanResult`: run counts grouped by experiment and status
 - `_PublishedState`: atomically published pair of `baseline + snapshot`
 - `_refresh_lock`: serializes MLflow I/O between baseline and delta refreshes
 - `_state_lock`: protects publication/retrieval of the current state
 - `_stop_event`: coordinated stop signal for long-running loops
+
+### `mlflow_exporter/collector_queries.py`
+
+This is the MLflow query adapter.
+
+It is responsible for:
+
+- encapsulating MLflow pagination
+- expressing exporter-specific experiment and run filters
+- returning small immutable scan results instead of raw MLflow entities
+- keeping API-specific details out of the runtime control flow
+
+### `mlflow_exporter/collector_assembler.py`
+
+This module contains the collector helper.
+
+It is responsible for:
+
+- normalising partial run-status mappings
+- merging multiple run-scan results
+- building experiment baselines from query results
+- merging dirty experiment metadata onto the last baseline
+- building the exported snapshot from `stable baseline + volatile runs`
+
+### `mlflow_exporter/collector_state.py`
+
+This module defines collector state dataclasses.
+
+It is responsible for:
+
+- describing the published baseline/snapshot state objects
+- providing data-only shapes shared across collector modules
 
 ### `mlflow_exporter/metrics.py`
 
@@ -128,7 +165,7 @@ The baseline worker periodically:
 
 1. waits for the baseline interval
 2. tries to acquire the shared refresh lock
-3. rebuilds the baseline from MLflow
+3. scans all experiments and rebuilds the stable run slice from MLflow
 4. computes a merged snapshot from the new baseline
 5. atomically publishes the new state
 6. reports success or failure through callbacks
@@ -143,9 +180,11 @@ The delta loop periodically:
 1. waits for the poll interval
 2. tries to acquire the shared refresh lock
 3. if the lock is busy, returns the current published snapshot
-4. otherwise, re-computes the recent-data view from the latest baseline
-5. atomically publishes the new snapshot
-6. reports success or failure through callbacks
+4. otherwise, refreshes dirty experiment metadata using `last_update_time`
+5. scans the volatile run slice across all current experiments
+6. merges `stable baseline + volatile runs` into a new snapshot
+7. atomically publishes the new snapshot
+8. reports success or failure through callbacks
 
 This means the exporter prefers coherent stale data over unsafe concurrency.
 
@@ -174,18 +213,26 @@ Operationally:
 The exporter distinguishes between:
 
 - `baseline`
-  - stable historical view, rebuilt periodically
+  - all known experiments at baseline-build time
+  - only the stable run slice for each experiment
+  - rebuilt periodically
 - `snapshot`
   - exported view currently served to Prometheus
 - `delta`
   - not stored as a first-class object
   - computed on demand from the latest baseline and merged immediately
+  - consists of:
+    - dirty experiment metadata (`last_update_time > horizon`)
+    - all `RUNNING` runs
+    - terminal runs with `end_time > horizon`
 
 This keeps the state model simple:
 
 - one published baseline
 - one published snapshot
 - no separate mutable delta cache to reconcile later
+- periodic baseline rebuilds repair rare historical changes outside the
+  volatile run window
 
 ## Mermaid Diagrams
 
@@ -215,9 +262,7 @@ classDiagram
     }
 
     class _Baseline {
-        +list old_experiment_ids
-        +dict old_experiments_by_stage
-        +dict old_runs_by_status
+        +dict experiments_by_id
         +int registered_models_total
         +int model_versions_total
         +dict model_versions_by_stage
@@ -225,9 +270,33 @@ classDiagram
         +float built_at
     }
 
+    class _ExperimentBaseline {
+        +str experiment_id
+        +int last_update_time
+        +str lifecycle_stage
+        +dict stable_runs_by_status
+    }
+
     class _PublishedState {
         +_Baseline baseline
         +MlflowSnapshot snapshot
+    }
+
+    class MlflowCollectorQueries {
+        +scan_all_experiments()
+        +scan_dirty_experiments(horizon_ms)
+        +scan_stable_runs_by_experiment(experiment_ids, horizon_ms)
+        +scan_volatile_runs_by_experiment(experiment_ids, horizon_ms)
+        +scan_model_versions()
+        +count_registered_models()
+    }
+
+    class CollectorAssembler {
+        +merge_run_count_results(left, right)
+        +build_experiment_baselines(experiments, stable_runs_by_experiment)
+        +build_baseline(experiment_baselines, registered_models_total, model_versions, horizon_ms)
+        +current_experiments_from_baseline(baseline, dirty_experiments)
+        +build_snapshot(baseline, current_experiments, volatile_runs_by_experiment)
     }
 
     class PrometheusMetrics {
@@ -239,7 +308,7 @@ classDiagram
     }
 
     class MlflowObservabilityCollector {
-        -MlflowClient _client
+        -MlflowCollectorQueries _queries
         -Lock _refresh_lock
         -Lock _state_lock
         -Event _stop_event
@@ -276,8 +345,12 @@ classDiagram
     ExporterRuntime --> MlflowObservabilityCollector : uses
     ExporterRuntime --> PrometheusMetrics : uses
     ExporterRuntime --> ExporterServer : uses
+    MlflowObservabilityCollector --> MlflowCollectorQueries : delegates reads
+    MlflowObservabilityCollector --> CollectorAssembler : delegates assembly
+    MlflowCollectorQueries --> CollectorAssembler : delegates run-count merges
     MlflowObservabilityCollector --> _PublishedState : publishes
     _PublishedState --> _Baseline : contains
+    _Baseline --> _ExperimentBaseline : contains
     _PublishedState --> MlflowSnapshot : contains
     ExporterRuntime --> ExporterSettings : configured by
 ```
@@ -341,7 +414,8 @@ sequenceDiagram
         Collector->>Collector: wait(stop_event, poll_interval)
         Collector->>Collector: try refresh lock
         alt lock acquired
-            Collector->>MLflow: scan fresh experiments/runs
+            Collector->>MLflow: refresh dirty experiments
+            Collector->>MLflow: scan running + recently ended runs
             Collector->>Collector: publish new snapshot
             Collector->>Metrics: on_snapshot callback
         else lock busy
@@ -390,4 +464,3 @@ Notable tradeoffs:
 
 The main deferred issue is the temporal correctness of run status changes for
 runs that started before the baseline horizon and completed later.
-
