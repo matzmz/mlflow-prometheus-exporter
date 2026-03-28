@@ -86,18 +86,6 @@ def parse_args(arguments: Optional[Sequence[str]] = None) -> ExporterSettings:
             )
         ),
     )
-    parser.add_argument(
-        "--mlflow-username",
-        type=str,
-        help="Optional username for MLflow basic authentication.",
-        default=os.getenv("MLFLOW_TRACKING_USERNAME"),
-    )
-    parser.add_argument(
-        "--mlflow-password",
-        type=str,
-        help="Optional password or API key for MLflow basic authentication.",
-        default=os.getenv("MLFLOW_TRACKING_PASSWORD"),
-    )
     parsed = parser.parse_args(arguments)
     _validate_positive_argument(parser, parsed.timeout, "--timeout")
     _validate_positive_argument(
@@ -112,8 +100,8 @@ def parse_args(arguments: Optional[Sequence[str]] = None) -> ExporterSettings:
         poll_interval_seconds=parsed.timeout,
         baseline_interval_seconds=parsed.baseline_interval,
         tracking_uri=parsed.mlflowurl,
-        tracking_username=parsed.mlflow_username,
-        tracking_password=parsed.mlflow_password,
+        tracking_username=os.getenv("MLFLOW_TRACKING_USERNAME"),
+        tracking_password=os.getenv("MLFLOW_TRACKING_PASSWORD"),
     )
 
 
