@@ -123,3 +123,26 @@ def test_mark_failure_records_duration_and_increments_counter(
     metrics.collect_success.set.assert_called_once_with(0)
     metrics.collect_timestamp_seconds.set.assert_called_once()
     metrics.collect_errors_total.inc.assert_called_once()
+
+
+def test_mark_baseline_success_records_duration_and_sets_flag(
+    metrics: PrometheusMetrics,
+) -> None:
+    """mark_baseline_success() observes duration and sets success to 1."""
+    metrics.mark_baseline_success(2.0)
+
+    metrics.baseline_duration_seconds.observe.assert_called_once_with(2.0)
+    metrics.baseline_success.set.assert_called_once_with(1)
+    metrics.baseline_timestamp_seconds.set.assert_called_once()
+
+
+def test_mark_baseline_failure_records_duration_and_increments_counter(
+    metrics: PrometheusMetrics,
+) -> None:
+    """mark_baseline_failure() records the failed baseline rebuild."""
+    metrics.mark_baseline_failure(0.8)
+
+    metrics.baseline_duration_seconds.observe.assert_called_once_with(0.8)
+    metrics.baseline_success.set.assert_called_once_with(0)
+    metrics.baseline_timestamp_seconds.set.assert_called_once()
+    metrics.baseline_errors_total.inc.assert_called_once()

@@ -65,6 +65,22 @@ class PrometheusMetrics:
             "mlflow_exporter_collect_errors_total",
             "Total number of failed MLflow collection cycles.",
         )
+        self.baseline_duration_seconds = Histogram(
+            "mlflow_exporter_baseline_duration_seconds",
+            "Time spent rebuilding the MLflow baseline.",
+        )
+        self.baseline_success = Gauge(
+            "mlflow_exporter_last_baseline_success",
+            "Whether the latest baseline rebuild succeeded.",
+        )
+        self.baseline_timestamp_seconds = Gauge(
+            "mlflow_exporter_last_baseline_timestamp_seconds",
+            "Unix timestamp of the latest completed baseline rebuild.",
+        )
+        self.baseline_errors_total = Counter(
+            "mlflow_exporter_baseline_errors_total",
+            "Total number of failed baseline rebuilds.",
+        )
 
     def update_snapshot(self, snapshot: MlflowSnapshot) -> None:
         """Publish a successful MLflow snapshot to Prometheus."""
@@ -91,3 +107,16 @@ class PrometheusMetrics:
         self.collect_success.set(0)
         self.collect_timestamp_seconds.set(time.time())
         self.collect_errors_total.inc()
+
+    def mark_baseline_success(self, duration_seconds: float) -> None:
+        """Record a successful baseline rebuild."""
+        self.baseline_duration_seconds.observe(duration_seconds)
+        self.baseline_success.set(1)
+        self.baseline_timestamp_seconds.set(time.time())
+
+    def mark_baseline_failure(self, duration_seconds: float) -> None:
+        """Record a failed baseline rebuild."""
+        self.baseline_duration_seconds.observe(duration_seconds)
+        self.baseline_success.set(0)
+        self.baseline_timestamp_seconds.set(time.time())
+        self.baseline_errors_total.inc()
