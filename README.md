@@ -35,14 +35,20 @@ A lightweight Prometheus exporter that scrapes an [MLflow](https://mlflow.org/) 
 | `mlflow_exporter_last_collect_success` | Gauge | `1` if the last collection cycle succeeded, `0` otherwise |
 | `mlflow_exporter_last_collect_timestamp_seconds` | Gauge | Unix timestamp of the last completed collection cycle |
 | `mlflow_exporter_collect_errors_total` | Counter | Total number of failed collection cycles |
+| `mlflow_exporter_baseline_duration_seconds` | Histogram | Time spent rebuilding the baseline |
+| `mlflow_exporter_last_baseline_success` | Gauge | `1` if the last baseline rebuild succeeded, `0` otherwise |
+| `mlflow_exporter_last_baseline_timestamp_seconds` | Gauge | Unix timestamp of the last completed baseline rebuild |
+| `mlflow_exporter_baseline_errors_total` | Counter | Total number of failed baseline rebuilds |
 
 
 ## Architecture
 
 The exporter uses a **baseline + delta** caching strategy to keep polling overhead negligible even against large MLflow deployments:
 
-- **Baseline** — a full scan of all data older than `HORIZON_DAYS` (default: 7 days). Rebuilt every `CACHE_TTL_SECONDS` (default: 1 h) in a background thread so active polls are never blocked.
-- **Delta** — a lightweight re-scan of only data newer than the horizon, executed on every poll cycle (default: every 30 s).
+- **Baseline** — a full scan of all data older than `HORIZON_DAYS` (default: 7 days). Built once during startup and then rebuilt every `BASELINE_INTERVAL_SECONDS` (default: 1 h) in a background thread.
+- **Delta** — a lightweight re-scan of only data newer than the latest baseline horizon, executed on every poll cycle (default: every 30 s).
+
+The exporter starts serving `/metrics` only after the initial baseline has completed. If a baseline rebuild and delta refresh overlap, the exporter serves the last published snapshot instead of blocking scrapes.
 
 Model-registry data (registered models and model versions) has no timestamp filter in the MLflow API and is therefore taken entirely from the baseline.
 
@@ -54,9 +60,11 @@ All settings can be provided through **CLI arguments** or **environment variable
 | CLI argument | Environment variable | Default | Description |
 |---|---|---|---|
 | `-p` / `--port` | `PORT` | `8000` | Port on which the exporter HTTP server listens |
+| `--listen-address` | `LISTEN_ADDRESS` | `0.0.0.0` | Address on which the exporter HTTP server listens |
 | `-u` / `--mlflowurl` | `MLFLOW_TRACKING_URI` | `http://localhost:5000/` | MLflow tracking server URI |
 | — | `MLFLOW_URL` | — | Legacy fallback URI (used when `MLFLOW_TRACKING_URI` is not set) |
 | `-t` / `--timeout` | `TIMEOUT` | `30` | Poll interval in seconds |
+| `--baseline-interval` | `BASELINE_INTERVAL_SECONDS` | `3600` | Baseline rebuild interval in seconds |
 | `--mlflow-username` | `MLFLOW_TRACKING_USERNAME` | — | Username for MLflow basic authentication |
 | `--mlflow-password` | `MLFLOW_TRACKING_PASSWORD` | — | Password or API key for MLflow basic authentication |
 
@@ -137,16 +145,18 @@ Commit the updated `*.txt` files alongside the `*.in` changes.
 ```
 mlflow_exporter/
 ├── __init__.py            # package marker
+├── main.py                # composition root and process entrypoint
 ├── settings.py            # constants and typed dataclasses
 ├── config.py              # CLI parsing, env resolution, MlflowClient setup
 ├── collector.py           # MLflow data collection with baseline+delta cache
 ├── metrics.py             # Prometheus metric definitions and update logic
-├── mlflow_exporter.py     # orchestrator: compose, start HTTP server, poll loop
+├── runtime.py             # runtime service coordinating collector + metrics
 └── tests/
     ├── test_collector.py
     ├── test_exporter_config.py
     ├── test_metrics.py
     ├── test_orchestrator.py
+    ├── test_runtime.py
     └── integration/
         └── test_mlflow_exporter.py
 ```
@@ -154,4 +164,3 @@ mlflow_exporter/
 ## License
 
 [GPL-3.0](LICENSE)
-
