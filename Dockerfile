@@ -26,7 +26,13 @@ ENV TZ=UTC \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
+RUN groupadd --system appgroup && useradd --system --gid appgroup --no-create-home appuser
+
 COPY --from=builder /opt/venv /opt/venv
 
+USER appuser
+
 EXPOSE 8000
-CMD ["/opt/venv/bin/mlflow-exporter"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD ["/opt/venv/bin/python", "-c", "import sys, urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/metrics', timeout=3); sys.exit(0)"]
+CMD ["/opt/venv/bin/python", "-m", "mlflow_exporter.main"]
