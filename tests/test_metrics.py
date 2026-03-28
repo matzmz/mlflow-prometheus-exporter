@@ -8,7 +8,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from mlflow_exporter.metrics import PrometheusMetrics
-from mlflow_exporter.settings import MODEL_STAGES, RUN_STATUSES, MlflowSnapshot
+from mlflow_exporter.settings import MODEL_STAGES, RUN_STATUSES
+
+from tests.helpers import make_snapshot
 
 
 def _new_mock(*args: Any, **kwargs: Any) -> MagicMock:
@@ -27,27 +29,6 @@ def metrics() -> Generator[PrometheusMetrics, None, None]:
         yield PrometheusMetrics()
 
 
-def _make_snapshot(
-    experiments_total: int = 0,
-    experiments_active_total: int = 0,
-    experiments_deleted_total: int = 0,
-    runs_total: int = 0,
-    registered_models_total: int = 0,
-    model_versions_total: int = 0,
-) -> MlflowSnapshot:
-    """Return a MlflowSnapshot with sensible test defaults."""
-    return MlflowSnapshot(
-        experiments_total=experiments_total,
-        experiments_active_total=experiments_active_total,
-        experiments_deleted_total=experiments_deleted_total,
-        runs_total=runs_total,
-        runs_by_status={s: 0 for s in RUN_STATUSES},
-        registered_models_total=registered_models_total,
-        model_versions_total=model_versions_total,
-        model_versions_by_stage={s: 0 for s in MODEL_STAGES},
-    )
-
-
 # ---------------------------------------------------------------------------
 # update_snapshot
 # ---------------------------------------------------------------------------
@@ -57,7 +38,7 @@ def test_update_snapshot_sets_scalar_gauges(
     metrics: PrometheusMetrics,
 ) -> None:
     """update_snapshot() sets each scalar Gauge to the snapshot value."""
-    snapshot = _make_snapshot(
+    snapshot = make_snapshot(
         experiments_total=10,
         experiments_active_total=8,
         experiments_deleted_total=2,
@@ -80,7 +61,7 @@ def test_update_snapshot_labels_runs_by_status(
     metrics: PrometheusMetrics,
 ) -> None:
     """update_snapshot() calls labels() exactly once per run status."""
-    metrics.update_snapshot(_make_snapshot())
+    metrics.update_snapshot(make_snapshot())
 
     assert metrics.runs_by_status.labels.call_count == len(RUN_STATUSES)
 
@@ -89,7 +70,7 @@ def test_update_snapshot_labels_model_versions_by_stage(
     metrics: PrometheusMetrics,
 ) -> None:
     """update_snapshot() calls labels() exactly once per model stage."""
-    metrics.update_snapshot(_make_snapshot())
+    metrics.update_snapshot(make_snapshot())
 
     assert metrics.model_versions_by_stage.labels.call_count == len(
         MODEL_STAGES

@@ -4,29 +4,15 @@
 from unittest.mock import MagicMock, patch
 
 from mlflow_exporter.main import build_runtime, main
-from mlflow_exporter.settings import ExporterSettings
+
+from tests.helpers import make_settings
 
 _MOD = "mlflow_exporter.main"
 
 
-def _make_settings(**overrides: object) -> ExporterSettings:
-    """Return an ExporterSettings with test-friendly defaults."""
-    defaults: dict = dict(
-        port=9999,
-        listen_address="0.0.0.0",
-        poll_interval_seconds=30,
-        baseline_interval_seconds=3600,
-        tracking_uri="http://localhost:5000/",
-        tracking_username=None,
-        tracking_password=None,
-    )
-    defaults.update(overrides)
-    return ExporterSettings(**defaults)
-
-
 def test_build_runtime_composes_runtime_with_dependencies() -> None:
     """build_runtime() wires client, collector, metrics, and runtime together."""
-    settings = _make_settings()
+    settings = make_settings()
     mock_client = object()
     with (
         patch(f"{_MOD}.configure_mlflow_client", return_value=mock_client),
@@ -47,7 +33,7 @@ def test_build_runtime_composes_runtime_with_dependencies() -> None:
 
 def test_main_parses_args_builds_runtime_and_runs_it() -> None:
     """main() parses args, builds a runtime, and runs it."""
-    settings = _make_settings()
+    settings = make_settings()
     runtime = MagicMock()
     with (
         patch(f"{_MOD}.parse_args", return_value=settings) as mock_parse,
