@@ -141,6 +141,7 @@ class MlflowObservabilityCollector:
 
     def stop(self) -> None:
         """Request background workers to stop on the next wait boundary."""
+        LOGGER.info("Collector stop requested")
         self._stop_event.set()
 
     def current_snapshot(self) -> MlflowSnapshot:
@@ -160,6 +161,7 @@ class MlflowObservabilityCollector:
         if published is None:
             raise RuntimeError("Collector is not initialized")
         if not self._refresh_lock.acquire(blocking=False):
+            LOGGER.debug("Delta refresh skipped: lock busy")
             return published.snapshot
         try:
             published = self._get_published_state()

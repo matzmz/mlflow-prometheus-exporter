@@ -47,8 +47,20 @@ def main(arguments: Optional[Sequence[str]] = None) -> None:
     arguments (Sequence[str] | None): Optional argument list passed through
         to ``parse_args``; defaults to ``sys.argv[1:]`` when ``None``.
     """
-    logging.basicConfig(level=logging.INFO)
-    runtime = build_runtime(parse_args(arguments))
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    )
+    settings = parse_args(arguments)
+    LOGGER.info(
+        "Starting exporter: tracking_uri=%s port=%d"
+        " poll=%ds baseline=%ds",
+        settings.tracking_uri,
+        settings.port,
+        settings.poll_interval_seconds,
+        settings.baseline_interval_seconds,
+    )
+    runtime = build_runtime(settings)
 
     def request_shutdown(_signum: int, _frame: object) -> None:
         """Ask the runtime to stop gracefully on termination signals."""
