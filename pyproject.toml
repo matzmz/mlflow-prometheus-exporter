@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.scripts]
-mlflow-exporter = "mlflow_exporter.mlflow_exporter:main"
+mlflow-exporter = "mlflow_exporter.main:main"
 
 [tool.setuptools.packages.find]
 include = ["mlflow_exporter"]
