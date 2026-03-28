@@ -7,12 +7,11 @@ import logging
 import signal
 from typing import Optional, Sequence
 
-from prometheus_client import start_http_server
-
 from mlflow_exporter.collector import MlflowObservabilityCollector
 from mlflow_exporter.config import configure_mlflow_client, parse_args
 from mlflow_exporter.metrics import PrometheusMetrics
 from mlflow_exporter.runtime import ExporterRuntime
+from mlflow_exporter.server import ExporterServer
 from mlflow_exporter.settings import ExporterSettings
 
 LOGGER = logging.getLogger(__name__)
@@ -31,11 +30,12 @@ def build_runtime(settings: ExporterSettings) -> ExporterRuntime:
         baseline_interval_seconds=settings.baseline_interval_seconds,
     )
     metrics = PrometheusMetrics()
+    server = ExporterServer()
     runtime = ExporterRuntime(
         settings=settings,
         collector=collector,
         metrics=metrics,
-        start_http_server=start_http_server,
+        server=server,
     )
     return runtime
 

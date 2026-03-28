@@ -4,10 +4,10 @@
 
 import logging
 import time
-from typing import Callable
 
 from mlflow_exporter.collector import MlflowObservabilityCollector
 from mlflow_exporter.metrics import PrometheusMetrics
+from mlflow_exporter.server import ExporterServer
 from mlflow_exporter.settings import ExporterSettings, MlflowSnapshot
 
 LOGGER = logging.getLogger(__name__)
@@ -21,17 +21,26 @@ class ExporterRuntime:
         settings: ExporterSettings,
         collector: MlflowObservabilityCollector,
         metrics: PrometheusMetrics,
-        start_http_server: Callable[..., None],
+        server: ExporterServer,
     ) -> None:
         """Store runtime collaborators and infrastructure hooks."""
         self._settings = settings
         self._collector = collector
         self._metrics = metrics
-        self._start_http_server = start_http_server
+        self._server = server
 
     def run(self) -> None:
         """Bootstrap the collector, expose metrics, and start refresh loops."""
         try:
+            self._server.start(
+                self._settings.port,
+                addr=self._settings.listen_address,
+            )
+            LOGGER.info(
+                "HTTP server listening on %s:%d",
+                self._settings.listen_address,
+                self._settings.port,
+            )
             LOGGER.info("Bootstrapping initial baseline")
             started = time.monotonic()
             snapshot = self._collector.initialize()
@@ -46,18 +55,10 @@ class ExporterRuntime:
             )
             self._publish_snapshot(snapshot, duration_seconds)
             self._metrics.mark_baseline_success(duration_seconds)
+            self._server.mark_ready()
             self._collector.start_baseline_worker_with_callbacks(
                 on_snapshot=self._publish_baseline_snapshot,
                 on_failure=self._metrics.mark_baseline_failure,
-            )
-            self._start_http_server(
-                self._settings.port,
-                addr=self._settings.listen_address,
-            )
-            LOGGER.info(
-                "HTTP server listening on %s:%d",
-                self._settings.listen_address,
-                self._settings.port,
             )
             self._collector.run_delta_refresh_loop(
                 poll_interval_seconds=self._settings.poll_interval_seconds,
