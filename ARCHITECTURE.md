@@ -5,12 +5,13 @@ Exporter.
 
 ## Overview
 
-The exporter is structured around four responsibilities:
+The exporter is structured around five responsibilities:
 
 - `main.py`: composition root and process entrypoint
 - `runtime.py`: application lifecycle and operational coordination
 - `collector.py`: MLflow data acquisition, caching, and concurrency control
 - `metrics.py`: Prometheus publication and health metrics
+- `server.py`: HTTP server with health probes and metrics endpoint
 
 The core design goal is to reduce load on MLflow while keeping the exporter
 simple and operationally safe:
@@ -42,16 +43,17 @@ This is the application service.
 
 It is responsible for:
 
+- starting the HTTP server (before bootstrap, enabling `/healthz`)
 - running the blocking bootstrap
 - publishing the first snapshot to Prometheus
 - marking baseline and delta health metrics
+- marking the server as ready (enabling `/readyz`)
 - starting the baseline background worker
-- starting the HTTP server
 - delegating the long-running delta loop to the collector
 - stopping collector-owned loops during shutdown
 
 It is the boundary between domain behavior (`collector`) and infrastructure
-concerns (`prometheus_client`, process lifecycle).
+concerns (`prometheus_client`, `ExporterServer`, process lifecycle).
 
 ### `mlflow_exporter/collector.py`
 
@@ -70,6 +72,8 @@ It is responsible for:
 Important internal concepts:
 
 - `_Baseline`: immutable stable state older than the horizon
+- `_ExperimentScanResult`: result of scanning experiments (IDs + counts by stage)
+- `_ModelVersionScanResult`: result of scanning model versions (total + counts by stage)
 - `_PublishedState`: atomically published pair of `baseline + snapshot`
 - `_refresh_lock`: serializes MLflow I/O between baseline and delta refreshes
 - `_state_lock`: protects publication/retrieval of the current state
@@ -87,20 +91,36 @@ It is responsible for:
 
 It does not know how snapshots are computed.
 
+### `mlflow_exporter/server.py`
+
+This module is the HTTP server.
+
+It is responsible for:
+
+- exposing `/healthz` (always `200`, liveness probe)
+- exposing `/readyz` (`503` until bootstrap completes, then `200`)
+- exposing `/metrics` (Prometheus exposition format)
+- returning `404` for unknown paths
+
+It starts before bootstrap so that liveness checks succeed immediately,
+and is marked ready after the initial baseline is published.
+
 ## Runtime Flow
 
 ### Startup
 
 1. `main()` parses configuration.
 2. `main()` builds `ExporterRuntime`.
-3. `runtime.run()` calls `collector.initialize()`.
-4. `collector.initialize()` performs a blocking baseline cycle.
-5. The first full snapshot is published to Prometheus.
-6. The baseline worker starts.
-7. The HTTP server starts listening.
-8. The collector-owned delta loop starts.
+3. `runtime.run()` starts the HTTP server (`/healthz` available immediately).
+4. `runtime.run()` calls `collector.initialize()`.
+5. `collector.initialize()` performs a blocking baseline cycle.
+6. The first full snapshot is published to Prometheus.
+7. The server is marked ready (`/readyz` returns `200`).
+8. The baseline worker starts.
+9. The collector-owned delta loop starts.
 
-This guarantees that `/metrics` is not exposed before a valid snapshot exists.
+This guarantees that `/healthz` works from the start while `/readyz` and
+meaningful `/metrics` data are gated behind a successful bootstrap.
 
 ### Baseline Refresh
 
@@ -235,9 +255,16 @@ classDiagram
         -ExporterSettings _settings
         -MlflowObservabilityCollector _collector
         -PrometheusMetrics _metrics
-        -Callable _start_http_server
+        -ExporterServer _server
         +run()
         +stop()
+    }
+
+    class ExporterServer {
+        -CollectorRegistry _registry
+        -Event _ready
+        +start(port, addr)
+        +mark_ready()
     }
 
     class main_py {
@@ -248,6 +275,7 @@ classDiagram
     main_py --> ExporterRuntime : builds
     ExporterRuntime --> MlflowObservabilityCollector : uses
     ExporterRuntime --> PrometheusMetrics : uses
+    ExporterRuntime --> ExporterServer : uses
     MlflowObservabilityCollector --> _PublishedState : publishes
     _PublishedState --> _Baseline : contains
     _PublishedState --> MlflowSnapshot : contains
@@ -294,6 +322,9 @@ sequenceDiagram
     Main->>Runtime: build_runtime(settings)
     Main->>Runtime: run()
 
+    Runtime->>HTTP: start(port, addr)
+    Note over HTTP: /healthz returns 200 immediately
+
     Runtime->>Collector: initialize()
     Collector->>MLflow: build baseline
     Collector->>MLflow: build snapshot from baseline
@@ -301,8 +332,9 @@ sequenceDiagram
     Runtime->>Metrics: update_snapshot(initial)
     Runtime->>Metrics: mark_success(bootstrap_duration)
     Runtime->>Metrics: mark_baseline_success(bootstrap_duration)
+    Runtime->>HTTP: mark_ready()
+    Note over HTTP: /readyz returns 200
     Runtime->>Collector: start_baseline_worker_with_callbacks(...)
-    Runtime->>HTTP: start_http_server(port, addr)
     Runtime->>Collector: run_delta_refresh_loop(...)
 
     loop Every delta interval
