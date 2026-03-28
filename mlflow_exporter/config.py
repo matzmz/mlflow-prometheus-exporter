@@ -11,7 +11,9 @@ import mlflow
 from mlflow.tracking import MlflowClient
 
 from mlflow_exporter.settings import (
+    DEFAULT_BASELINE_INTERVAL_SECONDS,
     DEFAULT_EXPORTER_PORT,
+    DEFAULT_LISTEN_ADDRESS,
     DEFAULT_POLL_INTERVAL_SECONDS,
     DEFAULT_TRACKING_URI,
     ExporterSettings,
@@ -54,6 +56,12 @@ def parse_args(arguments: Optional[Sequence[str]] = None) -> ExporterSettings:
         default=int(os.getenv("PORT", DEFAULT_EXPORTER_PORT)),
     )
     parser.add_argument(
+        "--listen-address",
+        type=str,
+        help="Address on which to expose the exporter HTTP server.",
+        default=os.getenv("LISTEN_ADDRESS", DEFAULT_LISTEN_ADDRESS),
+    )
+    parser.add_argument(
         "--mlflowurl",
         "-u",
         type=str,
@@ -68,6 +76,17 @@ def parse_args(arguments: Optional[Sequence[str]] = None) -> ExporterSettings:
         default=int(os.getenv("TIMEOUT", DEFAULT_POLL_INTERVAL_SECONDS)),
     )
     parser.add_argument(
+        "--baseline-interval",
+        type=int,
+        help="Interval for rebuilding the baseline in seconds.",
+        default=int(
+            os.getenv(
+                "BASELINE_INTERVAL_SECONDS",
+                DEFAULT_BASELINE_INTERVAL_SECONDS,
+            )
+        ),
+    )
+    parser.add_argument(
         "--mlflow-username",
         type=str,
         help="Optional username for MLflow basic authentication.",
@@ -80,13 +99,38 @@ def parse_args(arguments: Optional[Sequence[str]] = None) -> ExporterSettings:
         default=os.getenv("MLFLOW_TRACKING_PASSWORD"),
     )
     parsed = parser.parse_args(arguments)
+    _validate_positive_argument(parser, parsed.timeout, "--timeout")
+    _validate_positive_argument(
+        parser,
+        parsed.baseline_interval,
+        "--baseline-interval",
+    )
+    _validate_port_argument(parser, parsed.port)
     return ExporterSettings(
         port=parsed.port,
+        listen_address=parsed.listen_address,
         poll_interval_seconds=parsed.timeout,
+        baseline_interval_seconds=parsed.baseline_interval,
         tracking_uri=parsed.mlflowurl,
         tracking_username=parsed.mlflow_username,
         tracking_password=parsed.mlflow_password,
     )
+
+
+def _validate_positive_argument(
+    parser: argparse.ArgumentParser, value: int, argument_name: str
+) -> None:
+    """Reject non-positive integer runtime settings."""
+    if value <= 0:
+        parser.error(f"{argument_name} must be greater than 0")
+
+
+def _validate_port_argument(
+    parser: argparse.ArgumentParser, port: int
+) -> None:
+    """Reject ports outside the valid TCP user-space range."""
+    if port <= 0 or port > 65_535:
+        parser.error("--port must be between 1 and 65535")
 
 
 def configure_mlflow_client(settings: ExporterSettings) -> MlflowClient:
