@@ -1,6 +1,7 @@
 """Unit tests for the MLflow query adapter used by the collector."""
 
 import logging
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -94,6 +95,51 @@ def test_scan_all_experiments_returns_every_visible_experiment() -> None:
             lifecycle_stage="active",
         ),
     )
+
+
+def test_scan_all_experiments_defaults_missing_metadata() -> None:
+    """Missing MLflow metadata falls back to exporter-safe defaults."""
+    client = MagicMock()
+    client.search_experiments.return_value = FakePage(
+        [
+            SimpleNamespace(
+                experiment_id="exp-missing",
+                last_update_time=None,
+                lifecycle_stage=None,
+            )
+        ]
+    )
+    queries = MlflowCollectorQueries(client)
+
+    result = queries.scan_all_experiments()
+
+    assert result.experiments == (
+        _ExperimentRef(
+            experiment_id="exp-missing",
+            last_update_time=0,
+            lifecycle_stage="active",
+        ),
+    )
+
+
+def test_scan_all_experiments_accumulates_across_pages() -> None:
+    """Experiment scanning follows MLflow pagination until exhaustion."""
+    client = MagicMock()
+    client.search_experiments.side_effect = [
+        FakePage(
+            [make_experiment("exp-old", last_update_time=1)], token="next"
+        ),
+        FakePage([make_experiment("exp-new", last_update_time=2)]),
+    ]
+    queries = MlflowCollectorQueries(client)
+
+    result = queries.scan_all_experiments()
+
+    assert tuple(exp.experiment_id for exp in result.experiments) == (
+        "exp-old",
+        "exp-new",
+    )
+    assert client.search_experiments.call_count == 2
 
 
 def test_scan_dirty_experiments_applies_horizon_filter_to_api() -> None:
@@ -200,6 +246,20 @@ def test_scan_model_versions_counts_by_stage() -> None:
     assert result.by_stage["None"] == 1
 
 
+def test_scan_model_versions_keeps_unknown_stage_values() -> None:
+    """Unexpected model stages are preserved instead of being dropped."""
+    client = MagicMock()
+    client.search_model_versions.return_value = FakePage(
+        [make_model_version("Shadow")]
+    )
+    queries = MlflowCollectorQueries(client)
+
+    result = queries.scan_model_versions()
+
+    assert result.total == 1
+    assert result.by_stage["Shadow"] == 1
+
+
 def test_count_paginated_accumulates_across_multiple_pages() -> None:
     """The shared pagination helper sums every page."""
     page1 = FakePage(["a", "b", "c"], token="next-token")
@@ -221,3 +281,19 @@ def test_count_paginated_handles_single_page() -> None:
 
     assert total == 2
     assert search_fn.call_count == 1
+
+
+def test_scan_runs_accumulates_pages_and_unexpected_experiments() -> None:
+    """Run scanning keeps paginating and tolerates unexpected experiment IDs."""
+    client = MagicMock()
+    client.search_runs.side_effect = [
+        FakePage([make_run("RUNNING", experiment_id="exp2")], token="next"),
+        FakePage([make_run("FINISHED", experiment_id="exp1")]),
+    ]
+    queries = MlflowCollectorQueries(client)
+
+    result = queries._scan_runs_by_experiment(["exp1", "exp1"])
+
+    assert result.counts_by_experiment["exp1"]["FINISHED"] == 1
+    assert result.counts_by_experiment["exp2"]["RUNNING"] == 1
+    assert client.search_runs.call_count == 2

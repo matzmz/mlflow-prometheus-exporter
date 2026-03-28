@@ -1,5 +1,6 @@
-"""Unit tests for the mlflow_exporter orchestrator module."""
+"""Unit tests for the exporter entrypoint module."""
 
+import signal
 from unittest.mock import MagicMock, patch
 
 from mlflow_exporter.main import build_runtime, main
@@ -42,3 +43,35 @@ def test_main_parses_args_builds_runtime_and_runs_it() -> None:
     mock_parse.assert_called_once_with(None)
     mock_build.assert_called_once_with(settings)
     runtime.run.assert_called_once_with()
+
+
+def test_main_installs_shutdown_handler_and_restores_default_signals() -> None:
+    """The entrypoint restores signal handlers even after shutdown is requested."""
+    settings = make_settings()
+    runtime = MagicMock()
+    default_sigint = object()
+    default_sigterm = object()
+    installed_handlers: dict[int, object] = {}
+
+    def _record_signal_handler(signum: int, handler: object) -> None:
+        installed_handlers[signum] = handler
+
+    def _run_and_request_shutdown() -> None:
+        handler = installed_handlers[signal.SIGTERM]
+        assert callable(handler)
+        handler(signal.SIGTERM, object())
+
+    runtime.run.side_effect = _run_and_request_shutdown
+
+    with (
+        patch(f"{_MOD}.parse_args", return_value=settings),
+        patch(f"{_MOD}.build_runtime", return_value=runtime),
+        patch(f"{_MOD}.signal.getsignal") as mock_getsignal,
+        patch(f"{_MOD}.signal.signal", side_effect=_record_signal_handler),
+    ):
+        mock_getsignal.side_effect = [default_sigint, default_sigterm]
+        main()
+
+    assert runtime.stop.call_count == 1
+    assert installed_handlers[signal.SIGINT] is default_sigint
+    assert installed_handlers[signal.SIGTERM] is default_sigterm

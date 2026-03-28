@@ -109,6 +109,17 @@ def test_initialize_publishes_first_snapshot() -> None:
     assert collector.current_snapshot() == snapshot
 
 
+def test_initialize_raises_when_bootstrap_produces_no_snapshot() -> None:
+    """initialize() fails fast if the baseline cycle yields no snapshot."""
+    collector = MlflowObservabilityCollector(_empty_client())
+
+    with (
+        patch.object(collector, "_run_baseline_cycle", return_value=None),
+        pytest.raises(RuntimeError, match="Bootstrap failed"),
+    ):
+        collector.initialize()
+
+
 def test_refresh_delta_snapshot_rebuilds_from_latest_baseline() -> None:
     """Delta refreshes always use the currently published baseline."""
     collector = MlflowObservabilityCollector(_empty_client())
@@ -146,6 +157,34 @@ def test_refresh_delta_snapshot_returns_stale_snapshot_when_locked() -> None:
 
     mock_build.assert_not_called()
     assert snapshot == published_snapshot
+
+
+def test_refresh_delta_snapshot_requires_initialization() -> None:
+    """Delta refresh raises until a baseline has been published."""
+    collector = MlflowObservabilityCollector(_empty_client())
+
+    with pytest.raises(RuntimeError, match="not initialized"):
+        collector.refresh_delta_snapshot()
+
+
+def test_refresh_delta_snapshot_raises_if_state_disappears_after_lock() -> (
+    None
+):
+    """The collector rejects races where state vanishes after lock acquisition."""
+    collector = MlflowObservabilityCollector(_empty_client())
+    collector._publish_state(_make_baseline(), _make_snapshot(total=1))
+    published_state = collector._get_published_state()
+    assert published_state is not None
+
+    with (
+        patch.object(
+            collector,
+            "_get_published_state",
+            side_effect=[published_state, None],
+        ),
+        pytest.raises(RuntimeError, match="not initialized"),
+    ):
+        collector.refresh_delta_snapshot()
 
 
 def test_baseline_cycle_replaces_published_state() -> None:
@@ -293,6 +332,30 @@ def test_run_baseline_loop_reports_failure_through_callback() -> None:
 
     on_snapshot.assert_not_called()
     on_failure.assert_called_once()
+
+
+def test_run_baseline_loop_skips_callbacks_when_cycle_is_skipped() -> None:
+    """A skipped baseline cycle does not report success or failure."""
+    collector = MlflowObservabilityCollector(_empty_client())
+    on_snapshot = MagicMock()
+    on_failure = MagicMock()
+
+    with (
+        patch.object(
+            collector,
+            "_wait_for_next_baseline_cycle",
+            side_effect=[False, True],
+        ),
+        patch.object(
+            collector,
+            "_run_baseline_cycle",
+            return_value=None,
+        ),
+    ):
+        collector._run_baseline_loop(on_snapshot, on_failure)
+
+    on_snapshot.assert_not_called()
+    on_failure.assert_not_called()
 
 
 def test_run_delta_refresh_loop_publishes_snapshots_through_callback() -> None:
@@ -507,3 +570,14 @@ def test_backoff_interval_doubles_on_each_failure() -> None:
     """Consecutive failures successively double the wait interval."""
     assert _backoff_interval(30, 1) == 60
     assert _backoff_interval(30, 2) == 120
+
+
+def test_stop_sets_stop_event_and_unblocks_wait_methods() -> None:
+    """stop() flips the shared stop event used by both wait helpers."""
+    collector = MlflowObservabilityCollector(_empty_client())
+
+    collector.stop()
+
+    assert collector._stop_event.is_set()
+    assert collector._wait_for_next_baseline_cycle(1) is True
+    assert collector._wait_for_next_delta_cycle(1) is True
