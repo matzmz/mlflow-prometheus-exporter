@@ -95,7 +95,8 @@ class MlflowObservabilityCollector:
     def initialize(self) -> MlflowSnapshot:
         """Build and publish the first baseline before serving traffic."""
         snapshot = self._run_baseline_cycle(blocking=True)
-        assert snapshot is not None
+        if snapshot is None:
+            raise RuntimeError("Bootstrap failed to produce a snapshot")
         return snapshot
 
     def start_baseline_worker(self) -> None:
@@ -150,7 +151,8 @@ class MlflowObservabilityCollector:
             return published.snapshot
         try:
             published = self._get_published_state()
-            assert published is not None
+            if published is None:
+                raise RuntimeError("Collector is not initialized")
             snapshot = self._build_snapshot_from_baseline(published.baseline)
             self._publish_state(published.baseline, snapshot)
             return snapshot
