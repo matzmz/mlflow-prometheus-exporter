@@ -1,5 +1,3 @@
-
-
 """MLflow observability data collector with coordinated baseline+delta refreshes.
 
 Polling strategy
@@ -43,15 +41,11 @@ LOGGER = logging.getLogger(__name__)
 MAX_BACKOFF_SECONDS = 600
 
 
-def _backoff_interval(
-    base_interval: int, consecutive_failures: int
-) -> int:
+def _backoff_interval(base_interval: int, consecutive_failures: int) -> int:
     """Return the wait interval with exponential backoff on failures."""
     if consecutive_failures <= 0:
         return base_interval
-    return min(
-        base_interval * (2 ** consecutive_failures), MAX_BACKOFF_SECONDS
-    )
+    return min(base_interval * (2**consecutive_failures), MAX_BACKOFF_SECONDS)
 
 
 @dataclass(frozen=True)
@@ -217,9 +211,7 @@ class MlflowObservabilityCollector:
                 on_failure(time.monotonic() - started)
                 LOGGER.exception("Background baseline refresh failed")
 
-    def _wait_for_next_baseline_cycle(
-        self, interval_seconds: int
-    ) -> bool:
+    def _wait_for_next_baseline_cycle(self, interval_seconds: int) -> bool:
         """Wait for the next baseline cycle or a stop request."""
         return self._stop_event.wait(interval_seconds)
 
@@ -354,7 +346,8 @@ class MlflowObservabilityCollector:
                 page_token=page_token,
             )
             for exp in page:
-                if exp.last_update_time <= horizon_ms:
+                update_time = exp.last_update_time or 0
+                if update_time <= horizon_ms:
                     old_ids.append(exp.experiment_id)
                     stage = exp.lifecycle_stage or "active"
                     old_by_stage[stage] = old_by_stage.get(stage, 0) + 1
