@@ -1,4 +1,4 @@
-FROM python:3.11-trixie AS builder
+FROM python:3.13-trixie AS builder
 
 WORKDIR /build
 
@@ -19,7 +19,7 @@ COPY pyproject.toml .
 COPY mlflow_exporter/ ./mlflow_exporter/
 RUN /opt/venv/bin/pip install --no-cache-dir --no-deps .
 
-FROM python:3.11-slim-trixie AS runtime
+FROM python:3.13-slim-trixie AS runtime
 
 ARG VERSION
 ENV TZ=UTC \
