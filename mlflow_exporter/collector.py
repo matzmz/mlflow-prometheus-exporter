@@ -38,7 +38,7 @@ from mlflow_exporter.settings import (
 )
 
 LOGGER = logging.getLogger(__name__)
-MAX_BACKOFF_SECONDS = 600
+MAX_BACKOFF_SECONDS = 120
 
 
 def _backoff_interval(base_interval: int, consecutive_failures: int) -> int:
