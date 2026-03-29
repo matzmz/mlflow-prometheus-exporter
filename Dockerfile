@@ -23,10 +23,12 @@ FROM python:3.13-slim-trixie AS runtime
 
 ARG VERSION
 ENV TZ=UTC \
+    HOME=/home/appuser \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-RUN groupadd --system appgroup && useradd --system --gid appgroup --no-create-home appuser
+RUN groupadd --system appgroup \
+    && useradd --system --create-home --home-dir /home/appuser --gid appgroup appuser
 
 COPY --from=builder /opt/venv /opt/venv
 
