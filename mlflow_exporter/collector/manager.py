@@ -149,6 +149,10 @@ class MlflowObservabilityCollector:
             _backoff_interval(poll_interval_seconds, consecutive_failures)
         ):
             started = time.monotonic()
+            LOGGER.info(
+                "Starting poll cycle (poll_interval_seconds=%d)",
+                poll_interval_seconds,
+            )
             try:
                 snapshot = self.refresh_delta_snapshot()
                 on_snapshot(snapshot, time.monotonic() - started)

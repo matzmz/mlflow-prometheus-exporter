@@ -167,6 +167,28 @@ def test_refresh_delta_snapshot_requires_initialization() -> None:
         collector.refresh_delta_snapshot()
 
 
+def test_run_delta_refresh_loop_logs_each_poll_cycle(caplog) -> None:
+    """The collector logs when a new poll cycle starts."""
+    collector = MlflowObservabilityCollector(_empty_client())
+
+    with (
+        caplog.at_level("INFO"),
+        patch.object(
+            collector,
+            "_wait_for_next_delta_cycle",
+            side_effect=[False, True],
+        ),
+        patch.object(collector, "refresh_delta_snapshot", return_value=_make_snapshot(1)),
+    ):
+        collector.run_delta_refresh_loop(
+            poll_interval_seconds=30,
+            on_snapshot=lambda _snapshot, _duration_seconds: None,
+            on_failure=lambda _duration_seconds: None,
+        )
+
+    assert "Starting poll cycle (poll_interval_seconds=30)" in caplog.text
+
+
 def test_refresh_delta_snapshot_raises_if_state_disappears_after_lock() -> (
     None
 ):
