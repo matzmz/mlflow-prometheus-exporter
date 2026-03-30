@@ -64,10 +64,11 @@ Model-registry data (registered models and model versions) has no timestamp filt
 
 ## Configuration
 
-Operational settings can be provided through **CLI arguments** or **environment variables**. CLI arguments take precedence over environment variables. Sensitive authentication values remain environment-variable based.
+Operational settings can be provided through **CLI arguments** or **environment variables**. You can also preload environment variables from a `.env` file with `--env-file`. Precedence is: **CLI arguments** > **shell environment** > **`.env` file** > built-in defaults. Sensitive authentication values remain environment-variable based.
 
 | CLI argument | Environment variable | Default | Description |
 |---|---|---|---|
+| `--env-file` | — | — | Path to a `.env` file loaded before resolving the other settings |
 | `-p` / `--port` | `PORT` | `8000` | Port on which the exporter HTTP server listens |
 | `--listen-address` | `LISTEN_ADDRESS` | `0.0.0.0` | Address on which the exporter HTTP server listens |
 | `-u` / `--mlflowurl` | `MLFLOW_TRACKING_URI` | `http://localhost:5000/` | MLflow tracking server URI |
@@ -111,6 +112,13 @@ docker run -d \
 ```shell
 pip install .
 mlflow-exporter --mlflowurl http://localhost:5000/ --port 8000 --timeout 30
+```
+
+Using a `.env` file:
+
+```shell
+cp .env.example .env
+mlflow-exporter --env-file .env
 ```
 
 Verify metrics are being served:

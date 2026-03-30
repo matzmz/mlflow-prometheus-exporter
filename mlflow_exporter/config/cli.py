@@ -6,6 +6,7 @@ from typing import Optional, Sequence
 
 import mlflow
 from mlflow.tracking import MlflowClient
+from dotenv import load_dotenv
 
 from mlflow_exporter.config.settings import (
     DEFAULT_BASELINE_INTERVAL_SECONDS,
@@ -50,7 +51,13 @@ def parse_args(arguments: Optional[Sequence[str]] = None) -> ExporterSettings:
     Returns:
     ExporterSettings: Resolved configuration for the exporter process.
     """
+    _load_environment_file(arguments)
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--env-file",
+        type=str,
+        help="Path to a .env file to load before resolving other settings.",
+    )
     parser.add_argument(
         "--port",
         "-p",
@@ -156,6 +163,28 @@ def parse_args(arguments: Optional[Sequence[str]] = None) -> ExporterSettings:
         log_level=parsed.log_level.upper(),
         log_format=parsed.log_format.lower(),
     )
+
+
+def _load_environment_file(arguments: Optional[Sequence[str]]) -> None:
+    """Load variables from a .env file before building parser defaults.
+
+    Existing process environment variables are preserved so that an explicit
+    shell export still wins over values defined in the file.
+    """
+    env_file = _extract_env_file_argument(arguments)
+    if env_file is None:
+        return
+    load_dotenv(dotenv_path=env_file, override=False)
+
+
+def _extract_env_file_argument(
+    arguments: Optional[Sequence[str]],
+) -> Optional[str]:
+    """Read --env-file without consuming the main CLI parser definition."""
+    preload_parser = argparse.ArgumentParser(add_help=False)
+    preload_parser.add_argument("--env-file", type=str)
+    parsed, _ = preload_parser.parse_known_args(arguments)
+    return parsed.env_file
 
 
 def _validate_positive_argument(

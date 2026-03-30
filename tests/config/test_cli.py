@@ -48,6 +48,59 @@ def test_parse_args_reads_mlflow_http_settings(monkeypatch) -> None:
     assert settings.mlflow_request_max_retries == 7
 
 
+def test_parse_args_loads_values_from_env_file(tmp_path, monkeypatch) -> None:
+    """Load exporter settings from a provided .env file."""
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    monkeypatch.delenv("PORT", raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "MLFLOW_TRACKING_URI=https://dotenv.example\nPORT=9100\n",
+        encoding="utf-8",
+    )
+
+    settings = parse_args(["--env-file", str(env_file)])
+
+    assert settings.tracking_uri == "https://dotenv.example"
+    assert settings.port == 9100
+
+
+def test_parse_args_prefers_shell_environment_over_env_file(
+    tmp_path, monkeypatch
+) -> None:
+    """Keep explicit process env vars ahead of .env file values."""
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "https://shell.example")
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "MLFLOW_TRACKING_URI=https://dotenv.example\n",
+        encoding="utf-8",
+    )
+
+    settings = parse_args(["--env-file", str(env_file)])
+
+    assert settings.tracking_uri == "https://shell.example"
+
+
+def test_parse_args_prefers_cli_over_env_file(tmp_path, monkeypatch) -> None:
+    """Keep explicit CLI arguments ahead of values loaded from .env."""
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "MLFLOW_TRACKING_URI=https://dotenv.example\n",
+        encoding="utf-8",
+    )
+
+    settings = parse_args(
+        [
+            "--env-file",
+            str(env_file),
+            "--mlflowurl",
+            "https://cli.example",
+        ]
+    )
+
+    assert settings.tracking_uri == "https://cli.example"
+
+
 def test_configure_mlflow_client_applies_credentials(monkeypatch):
     """Expose resolved MLflow connection settings through standard env vars."""
     settings = ExporterSettings(

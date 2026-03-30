@@ -19,6 +19,9 @@ MANIFEST
 venv/
 env/
 
+# Local environment files
+.env
+
 # tox
 .tox/
 
@@ -62,3 +65,6 @@ mlartifacts/
 !.github/workflows/
 .github/workflows/*
 !.github/workflows/*.yaml
+
+# Ignore custom CA
+root-ca.pem
