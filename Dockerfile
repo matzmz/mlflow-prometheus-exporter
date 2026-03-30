@@ -27,12 +27,12 @@ ENV TZ=UTC \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-RUN groupadd --system appgroup \
-    && useradd --system --create-home --home-dir /home/appuser --gid appgroup appuser
+RUN groupadd --gid 10001 appgroup \
+    && useradd --uid 10001 --gid 10001 --create-home --home-dir /home/appuser appuser
 
 COPY --from=builder /opt/venv /opt/venv
 
-USER appuser
+USER 10001:10001
 
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
