@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "mlflow-prometheus-exporter.fullname" . }}
+  labels:
+    {{- include "mlflow-prometheus-exporter.labels" . | nindent 4 }}
+data:
+  PORT: {{ .Values.config.port | quote }}
+  LISTEN_ADDRESS: {{ .Values.config.listenAddress | quote }}
+  TIMEOUT: {{ .Values.config.pollIntervalSeconds | quote }}
+  BASELINE_INTERVAL_SECONDS: {{ .Values.config.baselineIntervalSeconds | quote }}
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  LOG_FORMAT: {{ .Values.config.logFormat | quote }}
+  MLFLOW_TRACKING_URI: {{ .Values.mlflow.trackingUri | quote }}
+  MLFLOW_HTTP_REQUEST_TIMEOUT: {{ .Values.mlflow.requestTimeoutSeconds | quote }}
+  MLFLOW_HTTP_REQUEST_MAX_RETRIES: {{ .Values.mlflow.requestMaxRetries | quote }}

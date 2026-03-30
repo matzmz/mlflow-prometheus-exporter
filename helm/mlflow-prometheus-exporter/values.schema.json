@@ -1,0 +1,306 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "replicaCount": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Number of exporter pods to run."
+    },
+    "nameOverride": {
+      "type": "string"
+    },
+    "fullnameOverride": {
+      "type": "string"
+    },
+    "clusterDomain": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Cluster DNS suffix used to compose the internal Service FQDN."
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tag": {
+          "type": "string"
+        },
+        "pullPolicy": {
+          "type": "string",
+          "enum": ["Always", "IfNotPresent", "Never"]
+        },
+        "pullSecrets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["name"]
+          }
+        }
+      },
+      "required": ["repository", "pullPolicy", "pullSecrets"]
+    },
+    "podAnnotations": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "podLabels": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "resources": {
+      "type": "object"
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["ClusterIP", "NodePort", "LoadBalancer"]
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["type", "port", "annotations", "labels"]
+    },
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "listenAddress": {
+          "type": "string",
+          "minLength": 1
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "pollIntervalSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "baselineIntervalSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "logLevel": {
+          "type": "string",
+          "enum": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+        },
+        "logFormat": {
+          "type": "string",
+          "enum": ["text", "json"]
+        }
+      },
+      "required": [
+        "listenAddress",
+        "port",
+        "pollIntervalSeconds",
+        "baselineIntervalSeconds",
+        "logLevel",
+        "logFormat"
+      ]
+    },
+    "mlflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "trackingUri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requestTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "requestMaxRetries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "auth": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "existingSecret": {
+              "type": "string"
+            },
+            "username": {
+              "type": "string"
+            },
+            "password": {
+              "type": "string"
+            },
+            "usernameKey": {
+              "type": "string",
+              "minLength": 1
+            },
+            "passwordKey": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "existingSecret",
+            "username",
+            "password",
+            "usernameKey",
+            "passwordKey"
+          ],
+          "oneOf": [
+            {
+              "properties": {
+                "existingSecret": {
+                  "type": "string",
+                  "maxLength": 0
+                },
+                "username": {
+                  "type": "string",
+                  "maxLength": 0
+                },
+                "password": {
+                  "type": "string",
+                  "maxLength": 0
+                }
+              }
+            },
+            {
+              "properties": {
+                "existingSecret": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "username": {
+                  "type": "string",
+                  "maxLength": 0
+                },
+                "password": {
+                  "type": "string",
+                  "maxLength": 0
+                }
+              }
+            },
+            {
+              "properties": {
+                "existingSecret": {
+                  "type": "string",
+                  "maxLength": 0
+                },
+                "username": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "password": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          ]
+        }
+      },
+      "required": [
+        "trackingUri",
+        "requestTimeoutSeconds",
+        "requestMaxRetries",
+        "auth"
+      ]
+    },
+    "scrapeConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "scrapeInterval": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scrapeTimeout": {
+          "type": "string",
+          "minLength": 1
+        },
+        "metricsPath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scheme": {
+          "type": "string",
+          "enum": ["http", "https"]
+        },
+        "jobLabel": {
+          "type": "string",
+          "minLength": 1
+        },
+        "staticLabels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "enabled",
+        "labels",
+        "scrapeInterval",
+        "scrapeTimeout",
+        "metricsPath",
+        "scheme",
+        "jobLabel",
+        "staticLabels"
+      ]
+    }
+  },
+  "required": [
+    "replicaCount",
+    "nameOverride",
+    "fullnameOverride",
+    "clusterDomain",
+    "image",
+    "podAnnotations",
+    "podLabels",
+    "resources",
+    "service",
+    "config",
+    "mlflow",
+    "scrapeConfig"
+  ]
+}

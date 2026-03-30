@@ -127,6 +127,11 @@ Verify metrics are being served:
 curl http://localhost:8000/metrics
 ```
 
+### Helm chart
+
+A Helm chart for Kubernetes deployments is available in
+[`helm/mlflow-prometheus-exporter`](./helm/mlflow-prometheus-exporter).
+
 ---
 
 ## Development

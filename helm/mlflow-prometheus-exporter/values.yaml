@@ -1,0 +1,59 @@
+replicaCount: 1
+
+nameOverride: ""
+fullnameOverride: ""
+clusterDomain: cluster.local
+
+image:
+  repository: mlflow-prometheus-exporter
+  tag: ""
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+podAnnotations: {}
+podLabels: {}
+
+# Suggested minimum resources (example):
+# resources:
+#   requests:
+#     cpu: 100m
+#     memory: 128Mi
+#   limits:
+#     cpu: 500m
+#     memory: 512Mi
+resources: {}
+
+service:
+  type: ClusterIP
+  port: 8000
+  annotations: {}
+  labels: {}
+
+config:
+  listenAddress: 0.0.0.0
+  port: 8000
+  pollIntervalSeconds: 30
+  baselineIntervalSeconds: 3600
+  logLevel: INFO
+  logFormat: text
+
+mlflow:
+  trackingUri: http://mlflow.default.svc.cluster.local:5000/
+  requestTimeoutSeconds: 30
+  requestMaxRetries: 3
+  auth:
+    existingSecret: ""
+    username: ""
+    password: ""
+    usernameKey: MLFLOW_TRACKING_USERNAME
+    passwordKey: MLFLOW_TRACKING_PASSWORD
+
+scrapeConfig:
+  enabled: false
+  labels: {}
+  scrapeInterval: 30s
+  scrapeTimeout: 10s
+  metricsPath: /metrics
+  scheme: http
+  jobLabel: mlflow-prometheus-exporter
+  staticLabels: {}
