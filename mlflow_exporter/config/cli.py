@@ -5,8 +5,8 @@ import os
 from typing import Optional, Sequence
 
 import mlflow
-from mlflow.tracking import MlflowClient
 from dotenv import load_dotenv
+from mlflow.tracking import MlflowClient
 
 from mlflow_exporter.config.settings import (
     DEFAULT_BASELINE_INTERVAL_SECONDS,

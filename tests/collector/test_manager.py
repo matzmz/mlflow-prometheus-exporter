@@ -178,7 +178,9 @@ def test_run_delta_refresh_loop_logs_each_poll_cycle(caplog) -> None:
             "_wait_for_next_delta_cycle",
             side_effect=[False, True],
         ),
-        patch.object(collector, "refresh_delta_snapshot", return_value=_make_snapshot(1)),
+        patch.object(
+            collector, "refresh_delta_snapshot", return_value=_make_snapshot(1)
+        ),
     ):
         collector.run_delta_refresh_loop(
             poll_interval_seconds=30,
