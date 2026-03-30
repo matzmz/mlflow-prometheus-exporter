@@ -68,3 +68,6 @@ mlartifacts/
 
 # Ignore custom CA
 root-ca.pem
+
+# Ignore local kube config
+kube-config.yaml
