@@ -20,8 +20,10 @@ pluggy==1.6.0
     # via
     #   pytest
     #   pytest-cov
-pygments==2.19.2
-    # via pytest
+pygments==2.20.0
+    # via
+    #   -r requirements-integration.in
+    #   pytest
 pytest==9.0.2
     # via
     #   -r requirements-integration.in
