@@ -35,7 +35,8 @@ ENV TZ=UTC \
     PYTHONUNBUFFERED=1
     
 RUN groupadd --gid 10001 appgroup \
-    && useradd --uid 10001 --gid 10001 --create-home --home-dir /home/appuser appuser
+    && useradd --uid 10001 --gid 10001 --create-home --home-dir /home/appuser appuser \
+    && pip uninstall -y pip wheel
 
 COPY --from=builder /opt/venv /opt/venv
 
